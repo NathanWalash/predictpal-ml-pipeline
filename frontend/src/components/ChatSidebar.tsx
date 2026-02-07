@@ -8,106 +8,256 @@ import { Button } from "@/components/ui";
 import { Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const USE_CASE_LABELS: Record<string, string> = {
+  retail: "Retail & Sales",
+  energy: "Energy & Utilities",
+  healthcare: "Healthcare",
+  finance: "Finance",
+  "supply-chain": "Supply Chain",
+  other: "Other",
+};
+
+const FREQUENCY_LABELS: Record<string, string> = {
+  D: "Daily",
+  W: "Weekly",
+  MS: "Monthly",
+  QS: "Quarterly",
+  YS: "Yearly",
+};
+
+const MISSING_STRATEGY_LABELS: Record<string, string> = {
+  ffill: "Forward Fill",
+  bfill: "Backward Fill",
+  interpolate: "Interpolate",
+  drop: "Drop Rows",
+  mean: "Mean Fill",
+  median: "Median Fill",
+  value: "Custom Value",
+};
+
+const OUTLIER_STRATEGY_LABELS: Record<string, string> = {
+  cap: "Clip (IQR)",
+  remove: "Remove",
+  keep: "Keep All",
+};
+
+const BASELINE_MODEL_LABELS: Record<string, string> = {
+  lagged_ridge: "Lagged Ridge",
+  seasonal_naive: "Seasonal Naive",
+};
+
+const MULTIVARIATE_MODEL_LABELS: Record<string, string> = {
+  gbm: "Gradient Boosted Machines (GBM)",
+  xgb: "XGBoost",
+};
+
+const VALIDATION_LABELS: Record<string, string> = {
+  walk_forward: "Walk-forward",
+  single_split: "Single split",
+};
+
+function asLabel(value: string, lookup: Record<string, string>): string {
+  return lookup[value] || value;
+}
+
 function usePageContext(): string {
   const currentStep = useBuildStore((s) => s.currentStep);
+  const projectTitle = useBuildStore((s) => s.projectTitle);
+  const projectDescription = useBuildStore((s) => s.projectDescription);
+  const useCase = useBuildStore((s) => s.useCase);
   const columns = useBuildStore((s) => s.columns);
   const numericColumns = useBuildStore((s) => s.numericColumns);
   const rowCount = useBuildStore((s) => s.rowCount);
+  const detectedDateCol = useBuildStore((s) => s.detectedDateCol);
   const dateCol = useBuildStore((s) => s.dateCol);
   const targetCol = useBuildStore((s) => s.targetCol);
   const frequency = useBuildStore((s) => s.frequency);
   const missingStrategy = useBuildStore((s) => s.missingStrategy);
+  const missingFillValue = useBuildStore((s) => s.missingFillValue);
   const outlierStrategy = useBuildStore((s) => s.outlierStrategy);
-  const selectedLags = useBuildStore((s) => s.selectedLags);
+  const driverOutlierStrategy = useBuildStore((s) => s.driverOutlierStrategy);
   const horizon = useBuildStore((s) => s.horizon);
+  const lagConfig = useBuildStore((s) => s.lagConfig);
+  const autoSelectLags = useBuildStore((s) => s.autoSelectLags);
+  const testWindowWeeks = useBuildStore((s) => s.testWindowWeeks);
+  const validationMode = useBuildStore((s) => s.validationMode);
+  const calendarFeatures = useBuildStore((s) => s.calendarFeatures);
+  const holidayFeatures = useBuildStore((s) => s.holidayFeatures);
   const baselineModel = useBuildStore((s) => s.baselineModel);
   const multivariateModel = useBuildStore((s) => s.multivariateModel);
   const selectedDrivers = useBuildStore((s) => s.selectedDrivers);
   const uploadedFiles = useBuildStore((s) => s.uploadedFiles);
+  const driverFileName = useBuildStore((s) => s.driverFileName);
+  const driverNumericColumns = useBuildStore((s) => s.driverNumericColumns);
+  const widgets = useBuildStore((s) => s.widgets);
+  const summary = useBuildStore((s) => s.summary);
+  const tags = useBuildStore((s) => s.tags);
   const forecastResults = useBuildStore((s) => s.forecastResults);
+  const modelMetrics = forecastResults?.metrics || {};
+  const rmseImprovement = modelMetrics.improvement_pct;
 
   switch (currentStep) {
     case 1:
       return [
-        "Page: Upload / Get Started (Step 1).",
-        "The user is setting up their project and uploading data.",
+        "Page: Get Started (Step 1).",
+        "The user is setting up project details and uploading main/driver data.",
+        projectTitle ? `Project title: ${projectTitle}.` : "Project title not set yet.",
+        projectDescription ? `Project description: ${projectDescription}.` : "",
+        useCase
+          ? `Use case selected: ${asLabel(useCase, USE_CASE_LABELS)} (${useCase}).`
+          : "Use case not selected yet.",
         uploadedFiles.length
           ? `Uploaded file(s): ${uploadedFiles.join(", ")}.`
           : "No file uploaded yet.",
-        rowCount ? `Dataset has ${rowCount} rows, ${columns.length} columns.` : "",
+        rowCount ? `Main dataset has ${rowCount} rows and ${columns.length} columns.` : "",
+        detectedDateCol ? `Detected date column in main data: ${detectedDateCol}.` : "",
         numericColumns.length
-          ? `Numeric columns detected: ${numericColumns.join(", ")}.`
+          ? `Main numeric columns detected: ${numericColumns.join(", ")}.`
           : "",
-        "Help them understand CSV formatting, what columns are needed, and how to upload driver data.",
+        driverFileName
+          ? `Driver file loaded: ${driverFileName} with ${driverNumericColumns.length} numeric column(s).`
+          : "No driver file loaded yet (optional in this step).",
+        "Step 1 options shown to user: use-case bubbles and file upload zones for main data plus optional driver data.",
+        "Guide the user on required file structure, useful driver data, and what to do before moving to Step 2.",
       ]
         .filter(Boolean)
         .join(" ");
     case 2:
       return [
         "Page: Process Data (Step 2).",
-        "The user is configuring data cleaning and feature engineering.",
-        dateCol ? `Date column: ${dateCol}.` : "No date column selected yet.",
+        "The user is configuring cleaning and preprocessing settings.",
+        "Only reference Step 2 options that exist in this exact UI. Do not mention old or alternative option names.",
+        "Valid frequency options: Daily (D), Weekly (W), Monthly (MS), Quarterly (QS), Yearly (YS).",
+        "Valid missing strategy options: Forward Fill (ffill), Backward Fill (bfill), Interpolate (interpolate), Drop Rows (drop), Mean Fill (mean), Median Fill (median), Custom Value (value).",
+        "Valid outlier options for both target and drivers: Clip (IQR) (cap), Remove (remove), Keep All (keep).",
+        dateCol
+          ? `Date column selected: ${dateCol}.`
+          : detectedDateCol
+            ? `Date column not manually selected yet; detected date column is ${detectedDateCol}.`
+            : "No date column selected yet.",
         targetCol ? `Target column: ${targetCol}.` : "No target column selected yet.",
-        frequency ? `Frequency: ${frequency}.` : "",
-        missingStrategy ? `Missing-value strategy: ${missingStrategy}.` : "",
-        outlierStrategy ? `Outlier strategy: ${outlierStrategy}.` : "",
-        selectedLags.length ? `Lag features: ${selectedLags.join(", ")}.` : "",
-        "Help them decide on imputation, outlier handling, and feature choices.",
+        frequency ? `Frequency selected: ${asLabel(frequency, FREQUENCY_LABELS)} (${frequency}).` : "Frequency not selected yet.",
+        missingStrategy
+          ? `Missing strategy selected: ${asLabel(missingStrategy, MISSING_STRATEGY_LABELS)} (${missingStrategy}).`
+          : "Missing strategy not selected yet.",
+        missingStrategy === "value" && missingFillValue
+          ? `Custom missing fill value: ${missingFillValue}.`
+          : "",
+        outlierStrategy
+          ? `Target outlier strategy: ${asLabel(outlierStrategy, OUTLIER_STRATEGY_LABELS)} (${outlierStrategy}).`
+          : "",
+        driverOutlierStrategy
+          ? `Driver outlier strategy: ${asLabel(driverOutlierStrategy, OUTLIER_STRATEGY_LABELS)} (${driverOutlierStrategy}).`
+          : "",
+        `Current selection summary: frequency=${frequency || "not selected"}, missing=${missingStrategy || "not selected"}, target_outlier=${outlierStrategy || "not selected"}, driver_outlier=${driverOutlierStrategy || "not selected"}.`,
+        "Step 2 options shown to user: date/target column selectors, frequency, missing strategy, target outlier strategy, and driver outlier strategy.",
+        "Guide the user on practical tradeoffs for each processing choice based on their dataset.",
       ]
         .filter(Boolean)
         .join(" ");
     case 3:
       return [
         "Page: Train & Forecast (Step 3).",
-        "The user is selecting models and running the forecast.",
-        `Horizon: ${horizon} periods.`,
-        baselineModel ? `Baseline model: ${baselineModel}.` : "",
-        multivariateModel ? `Multivariate model: ${multivariateModel}.` : "",
+        "The user is selecting model/training settings and running training.",
+        baselineModel
+          ? `Baseline model selected: ${asLabel(baselineModel, BASELINE_MODEL_LABELS)} (${baselineModel}).`
+          : "",
+        multivariateModel
+          ? `Multivariate model selected: ${asLabel(multivariateModel, MULTIVARIATE_MODEL_LABELS)} (${multivariateModel}).`
+          : "",
+        `Forecast horizon selected: ${horizon} week(s).`,
+        `Lag configuration: ${autoSelectLags ? "Auto-select enabled" : `Manual preset ${lagConfig}`}.`,
+        `Test window: ${testWindowWeeks} week(s).`,
+        `Validation mode: ${asLabel(validationMode, VALIDATION_LABELS)} (${validationMode}).`,
+        `Calendar features: ${calendarFeatures ? "Enabled" : "Disabled"}.`,
+        `Holiday features: ${holidayFeatures ? "Enabled" : "Disabled"}.`,
+        driverFileName
+          ? `Driver file in use: ${driverFileName}. Available numeric drivers: ${driverNumericColumns.join(", ") || "none"}.`
+          : "No driver file uploaded, so training can run target-only.",
         selectedDrivers.length
           ? `Selected drivers: ${selectedDrivers.join(", ")}.`
           : "No drivers selected.",
         forecastResults
-          ? "Forecast has been run - results are available."
+          ? `Training has been run and results are available.${typeof rmseImprovement === "number" ? ` Reported improvement: ${rmseImprovement.toFixed(2)}%.` : ""}`
           : "Forecast has not been run yet.",
-        "Help them understand model choices, drivers, and training.",
+        "Step 3 options shown to user: model choices, lag config, driver selection, calendar/holiday toggles, test window, validation mode, and forecast horizon.",
+        "Help compare model settings and explain why the current setup may help or hurt performance.",
       ]
         .filter(Boolean)
         .join(" ");
     case 4:
       return [
-        "Page: Outputs / Report (Step 4).",
-        "The user is viewing the forecast results and building their report.",
+        "Page: Analysis & Results (Step 4).",
+        "The user is reviewing a guided analysis flow with model quality first, then future forecast outputs.",
+        "Step 4 includes fixed sections: Run Summary, Model Metrics, Test Fit, Future Forecast, Feature Importance, Error Trend, Driver Signals, and Forecast Table.",
+        widgets.length
+          ? `Widgets prepared for Step 5: ${widgets.map((w) => w.type).join(", ")}.`
+          : "",
         forecastResults
-          ? `Forecast generated with horizon ${forecastResults.horizon}. Drivers used: ${forecastResults.drivers_used?.join(", ") || "none"}.`
+          ? `Forecast results are available from Step 3 with horizon ${forecastResults.horizon} and drivers ${forecastResults.drivers_used?.join(", ") || "none"}.`
           : "No forecast results yet.",
-        "Help them interpret charts, accuracy metrics, and feature importance.",
+        "Help interpret model metrics, test-fit behavior, forecast trends, and driver importance in plain language.",
       ]
         .filter(Boolean)
         .join(" ");
     case 5:
       return [
-        "Page: Showcase (Step 5).",
-        "The user is finalising and publishing their project.",
-        "Help them write a summary, pick tags, and understand sharing options.",
+        "Page: Publish Story (Step 5).",
+        "The user is composing a notebook-style story and publishing to Explore.",
+        projectTitle ? `Project title: ${projectTitle}.` : "",
+        summary ? `Story description/summary: ${summary}.` : "Story description has not been written yet.",
+        tags.length ? `Selected categories/tags: ${tags.join(", ")}.` : "No categories selected yet.",
+        widgets.length ? `Available analysis sections from Step 4: ${widgets.map((w) => w.title).join(", ")}.` : "",
+        "Step 5 flow has three stages: Start Prompt, Notebook Builder, Preview & Publish.",
+        "Help the user write clearer narrative text, choose useful sections, and prepare an accurate publish-ready summary.",
       ].join(" ");
     default:
-      return "The user is using the Forecast Buddy no-code ML tool.";
+      return "The user is using the Predict Pal no-code ML tool.";
   }
 }
 
 function useReportData(): string | null {
   const currentStep = useBuildStore((s) => s.currentStep);
   const forecastResults = useBuildStore((s) => s.forecastResults);
+  const widgets = useBuildStore((s) => s.widgets);
+  const summary = useBuildStore((s) => s.summary);
+  const tags = useBuildStore((s) => s.tags);
+  const baselineModel = useBuildStore((s) => s.baselineModel);
+  const multivariateModel = useBuildStore((s) => s.multivariateModel);
+  const horizon = useBuildStore((s) => s.horizon);
+  const selectedDrivers = useBuildStore((s) => s.selectedDrivers);
+  const lagConfig = useBuildStore((s) => s.lagConfig);
+  const testWindowWeeks = useBuildStore((s) => s.testWindowWeeks);
+  const validationMode = useBuildStore((s) => s.validationMode);
 
-  if ((currentStep === 4 || currentStep === 5) && forecastResults) {
-    try {
-      return JSON.stringify(forecastResults);
-    } catch {
-      return null;
-    }
+  const hasContextPayload =
+    !!forecastResults || widgets.length > 0 || !!summary || tags.length > 0;
+  if (!hasContextPayload) return null;
+
+  const payload = {
+    step: currentStep,
+    forecast_results: forecastResults || null,
+    story_context: {
+      summary,
+      tags,
+      widgets,
+    },
+    training_context: {
+      horizon,
+      baseline_model: baselineModel,
+      multivariate_model: multivariateModel,
+      selected_drivers: selectedDrivers,
+      lag_config: lagConfig,
+      test_window_weeks: testWindowWeeks,
+      validation_mode: validationMode,
+    },
+  };
+
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return null;
   }
-
-  return null;
 }
 
 function renderInlineMarkdown(text: string): ReactNode[] {
@@ -237,18 +387,18 @@ export default function ChatSidebar() {
   }, [input, chatMessages, projectId, pageContext, reportData, addChatMessage]);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-slate-800 p-4">
         <div className="flex h-8 w-8 items-center justify-center rounded-full border border-teal-800 bg-teal-900/50">
           <span className="text-sm">🤖</span>
         </div>
         <div>
-          <h3 className="text-sm font-semibold text-white">Forecast Buddy</h3>
+          <h3 className="text-sm font-semibold text-white">Predict Pal</h3>
           <p className="text-xs text-teal-500">Online</p>
         </div>
       </div>
 
-      <div className="scrollbar-thin flex-1 space-y-3 overflow-y-auto p-4">
+      <div className="scrollbar-thin flex-1 min-h-0 space-y-3 overflow-y-auto p-4">
         {chatMessages.map((msg, i) => (
           <div
             key={i}
@@ -293,3 +443,4 @@ export default function ChatSidebar() {
     </div>
   );
 }
+

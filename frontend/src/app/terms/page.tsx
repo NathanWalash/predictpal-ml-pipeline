@@ -5,7 +5,7 @@ export default function TermsPage() {
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 md:p-8">
           <h1 className="text-3xl font-bold text-white">Terms & Conditions</h1>
           <p className="mt-3 text-sm text-slate-400 leading-relaxed">
-            ForecastBuddy is currently provided as a demo/prototype environment. By using this application, you agree
+            PredictPal is currently provided as a demo/prototype environment. By using this application, you agree
             that forecasting outputs are informational and should be reviewed before production decision-making.
           </p>
         </div>
@@ -37,3 +37,4 @@ export default function TermsPage() {
     </div>
   );
 }
+

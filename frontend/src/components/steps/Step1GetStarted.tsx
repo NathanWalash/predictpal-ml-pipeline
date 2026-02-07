@@ -205,7 +205,10 @@ export default function Step1GetStarted() {
   });
 
   const canContinue =
-    uploadedFiles.length > 0 && uploadStatus === "success";
+    uploadedFiles.length > 0 && rowCount > 0;
+
+  const hasMainDataset = uploadedFiles.length > 0 && rowCount > 0;
+  const showMainUploadSuccess = uploadStatus === "success" || hasMainDataset;
 
   const handleContinue = () => {
     completeStep(1);
@@ -291,7 +294,7 @@ export default function Step1GetStarted() {
             Uploading & analyzing...
           </div>
         )}
-        {uploadStatus === "success" && (
+        {showMainUploadSuccess && (
           <div className="mt-4 flex items-center gap-3 text-emerald-400 text-sm">
             <CheckCircle2 className="w-4 h-4" />
             File uploaded successfully
@@ -475,7 +478,7 @@ export default function Step1GetStarted() {
       </div>
 
       {/* Data Preview */}
-      {uploadStatus === "success" && previewData.length > 0 && (
+      {hasMainDataset && previewData.length > 0 && (
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-white flex items-center gap-2">

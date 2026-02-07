@@ -75,7 +75,7 @@ export default function Home() {
       <section className="relative max-w-6xl mx-auto px-6 pt-20 pb-10">
         <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-teal-900/30 border border-teal-800 rounded-full text-teal-300 text-sm font-medium mb-6">
           <BarChart3 className="w-4 h-4" />
-          ForecastBuddy Workbench
+          PredictPal Workbench
         </div>
         <h1 className="text-5xl md:text-6xl font-bold text-white leading-tight tracking-tight">
           Forecast smarter.
@@ -124,7 +124,7 @@ export default function Home() {
             Help more people make forecasting decisions with confidence.
           </h3>
           <p className="mt-3 text-sm text-slate-400 leading-relaxed max-w-3xl">
-            ForecastBuddy guides users from upload to publish with a clear workflow, analysis-first charts, and an AI
+            PredictPal guides users from upload to publish with a clear workflow, analysis-first charts, and an AI
             assistant that explains tradeoffs in plain English.
           </p>
           <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -145,7 +145,7 @@ export default function Home() {
         <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 md:p-8">
           <div className="flex items-center gap-2 text-sm font-semibold text-teal-300">
             <Sparkles className="w-4 h-4" />
-            Why teams use ForecastBuddy
+            Why teams use PredictPal
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
             {HIGHLIGHTS.map((item) => (
@@ -184,3 +184,4 @@ export default function Home() {
     </div>
   );
 }
+

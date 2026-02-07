@@ -1,59 +1,113 @@
-# ForecastBuddy — Copilot Instructions
+# PredictPal - Copilot Instructions
 
-## Architecture
+## Snapshot
 
-Monorepo: `backend/` (FastAPI, Python 3.10–3.12) and `frontend/` (Next.js 16, React 19, TypeScript). They communicate via REST — the frontend Axios client hits `http://localhost:8000/api`. Backend CORS allows `localhost:3000`.
+PredictPal is a monorepo with:
+- `backend/`: FastAPI API (Python 3.10-3.12)
+- `frontend/`: Next.js 16 App Router app (React 19 + TypeScript)
 
-**All backend state is in-memory dicts** (`_users`, `_projects`, `_dataframes`). Everything resets on server restart. Auth is SHA-256 hashed passwords with no tokens or middleware — intentionally simple for a hackathon.
+Frontend talks to backend through `NEXT_PUBLIC_API_URL` (default `http://localhost:8000/api`).
 
-## Backend Conventions
+## Current Architecture
 
-- Single router in `backend/app/api/endpoints.py`, mounted at `/api` in `main.py`
-- Request bodies: Pydantic `BaseModel` subclasses defined inline in `endpoints.py`
-- Routes return plain `dict`, no response models
-- Run with: `python -m uvicorn app.main:app --reload --port 8000` (from `backend/`)
-- Core logic split: `core/processing.py` (data ingestion) and `core/forecasting.py` (skforecast models)
-- `core/config.py` exists but is **unused** — Supabase/OpenAI clients are stubbed
-- Chat endpoint is a keyword-matching stub, not connected to any LLM
-- **Version constraints matter**: `pandas<2.2`, `scikit-learn<1.4`, `skforecast==0.11.0`, `numpy<2.0`
+### Backend
+- Entry point: `backend/app/main.py`
+- Router: `backend/app/api/endpoints.py` mounted at `/api`
+- CORS allows `http://localhost:3000`
+- Runtime state is in-memory dicts (`_projects`, `_users`, `_dataframes`, etc.) and resets on backend restart
+- Forecast/training pipeline is in `backend/app/core/training.py` and related modules (`features.py`, `evaluation.py`, `grid_search.py`, `models.py`)
+- Preprocessing pipeline is in `backend/app/core/preprocessing.py`
+- Data loading and detection logic is in `backend/app/core/processing.py`
 
-## Frontend Conventions
+### Frontend
+- App Router pages are under `frontend/src/app/`
+- Main build wizard route is `/create` (not `/build`)
+- Wizard step components are in `frontend/src/components/steps/`:
+  - `Step1GetStarted.tsx`
+  - `Step2ProcessData.tsx`
+  - `Step3TrainForecast.tsx`
+  - `Step4Analysis.tsx`
+  - `Step5Showcase.tsx`
+- Shared state uses Zustand in `frontend/src/lib/store.ts`:
+  - `useAuthStore` is persisted to localStorage
+  - `useBuildStore` is in-memory per tab session
+- API wrappers are in `frontend/src/lib/api.ts`
 
-- **App Router** — all pages use `"use client"` directive
-- **State**: two Zustand stores in `src/lib/store.ts`:
-  - `useAuthStore` — persisted to localStorage, holds `user: {user_id, username} | null`
-  - `useBuildStore` — not persisted, ~40 flat fields with individual setters, steps 1–5
-- **Selectors**: always use per-field selectors: `useBuildStore((s) => s.currentStep)`, never destructure the full store at top level
-- **API client**: `src/lib/api.ts` — one async function per endpoint, returns `res.data`
-- **Icons**: all from `lucide-react`, never use other icon libraries
-- **Path alias**: `@/*` → `./src/*`. Always import as `@/lib/store`, `@/components/ui`, etc.
+## API Surface (Current)
 
-## UI Component Patterns
+Primary backend routes used by frontend:
+- Auth:
+  - `POST /api/auth/register`
+  - `POST /api/auth/login`
+- Projects:
+  - `POST /api/projects/create`
+  - `GET /api/projects/{user_id}`
+  - `GET /api/projects/detail/{project_id}`
+  - `POST /api/projects/update`
+- Data pipeline:
+  - `POST /api/upload`
+  - `POST /api/upload-drivers`
+  - `POST /api/analyze`
+  - `POST /api/process`
+  - `POST /api/train`
+  - `GET /api/analysis/sample`
+- Chat:
+  - `POST /api/chat`
+- Explore/stories:
+  - `GET /api/stories`
+  - `GET /api/stories/{story_id}`
 
-All primitives live in **one barrel file**: `src/components/ui/index.tsx`. Import as:
-```tsx
-import { Button, BubbleSelect, Input, Card } from "@/components/ui";
-```
+## Data and Forecast Flow
 
-- `BubbleSelect` is the signature component — use it instead of `<Select>` for user-facing option picking. It takes `options: {id, label, icon?, description?}[]` and supports `multi` mode.
-- Dark theme hardcoded everywhere: backgrounds `slate-800/900`, accents `teal-400/500/600`, cards use `rounded-2xl border border-slate-800 bg-slate-900/60 p-6`
-- Use `cn()` from `@/lib/utils` for all className merging (clsx + tailwind-merge)
+1. Step 1 uploads target file via `/upload`, optional driver file via `/upload-drivers`.
+2. Step 2 calls `/process` to clean/normalize target data and optional drivers.
+3. Step 3 calls `/train` for baseline + multivariate forecasting.
+4. Step 4 currently renders from `/analysis/sample` (precomputed bundle from `backend/app/outputs`), not from per-project training output.
+5. Step 5 builds a notebook-style story and publishes by calling `/projects/update` with `config.published = true`.
 
-## Build Step Component Pattern
+## Chat Behavior
 
-Each `Step{N}*.tsx` in `src/components/build/` follows this structure:
-1. `"use client"` + destructure state from `useBuildStore()`
-2. Local `useState` for transient UI state (`status: "idle" | "success" | "error"`)
-3. Navigation at bottom: `<Button variant="secondary" onClick={prevStep}>← Back</Button>` + continue button calling `completeStep(n); nextStep()`
-4. Loading state via store: `setLoading(true)` / `setLoadingMessage("...")`
+- Backend chat is implemented in `backend/app/core/gemini.py`.
+- If `GEMINI_API_KEY` is set, `/chat` uses Google Gemini (`google-genai`) with retry/error handling.
+- If no key exists, it falls back to keyword-based stub replies.
+- Frontend chat context is assembled from current wizard state in `frontend/src/components/ChatSidebar.tsx`.
 
-## Key Gotchas
+## Story/Explore Behavior
 
-- `config.py` and `class-variance-authority` are installed but unused — don't reference them
-- Forecast drivers are synthetic (`generate_dummy_exog`), not from real uploaded data
-- `useBuildStore` resets on refresh — this is intentional
-- React Compiler is enabled (`babel-plugin-react-compiler`) — avoid non-idiomatic mutations
-- Debug mode on `/build` bypasses step gating — toggle via the bug icon
+- Live stories come from backend published projects (`/stories`).
+- Explore page also merges static debug stories from `frontend/src/lib/debugStories.ts`.
+- Story detail page loads either backend story or debug story, then renders notebook blocks via `frontend/src/components/story/StoryNotebook.tsx`.
+
+## UI and Styling Conventions
+
+- Reusable UI primitives are in `frontend/src/components/ui/index.tsx`.
+- `BubbleSelect` is the default selector pattern in the wizard.
+- Theme is dark slate/teal across pages.
+- Icons use `lucide-react`.
+- Utility for class merging is `cn()` from `frontend/src/lib/utils.ts`.
+
+## Important Gotchas
+
+- Backend storage is volatile in-memory; restarting server drops users/projects/uploads.
+- Step 4 and story charts rely on sample analysis artifacts, so they can be decoupled from the exact project just trained.
+- Some Step components still destructure the full Zustand store; prefer selector-based access in new performance-sensitive components.
+- `.env` may include `OPENAI_API_KEY`, but chat path is Gemini-based in current implementation.
+- `class-variance-authority` exists in dependencies but UI primitives are handwritten in `ui/index.tsx`.
+
+## Dependency Constraints
+
+Backend pins include:
+- `pandas>=1.5,<2.2`
+- `scikit-learn>=1.0,<1.4`
+- `numpy>=1.24,<2.0`
+- `skforecast==0.11.0`
+- `google-genai>=1.0.0`
+
+Frontend core versions:
+- `next@16.1.6`
+- `react@19.2.3`
+- `tailwindcss@4`
+- `zustand@5`
 
 ## Commands
 
@@ -63,3 +117,4 @@ Each `Step{N}*.tsx` in `src/components/build/` follows this structure:
 | Frontend dev | `frontend/` | `npm run dev` |
 | Frontend build | `frontend/` | `npm run build` |
 | Frontend lint | `frontend/` | `npm run lint` |
+| Backend tests | `backend/` | `pytest` |

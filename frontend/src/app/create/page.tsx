@@ -35,9 +35,10 @@ const STEP_COMPONENTS: Record<number, React.ReactNode> = {
   5: <Step5Showcase />,
 };
 
-const CHAT_WIDTH_DEFAULT = 360;
-const CHAT_WIDTH_MIN = 280;
-const CHAT_WIDTH_MAX = 640;
+const CHAT_WIDTH_DEFAULT = 440;
+const CHAT_WIDTH_MIN = 320;
+const CHAT_WIDTH_MAX = 920;
+const MAIN_CONTENT_MIN_WIDTH = 680;
 
 export default function BuildPage() {
   const currentStep = useBuildStore((s) => s.currentStep);
@@ -48,20 +49,24 @@ export default function BuildPage() {
   const [chatWidth, setChatWidth] = useState(CHAT_WIDTH_DEFAULT);
   const isDraggingRef = useRef(false);
 
-  useEffect(() => {
+   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [currentStep]);
 
   useEffect(() => {
-    const savedWidth = window.localStorage.getItem("forecast-buddy-chat-width");
-    if (!savedWidth) return;
-    const parsed = Number(savedWidth);
-    if (!Number.isFinite(parsed)) return;
-    setChatWidth(Math.min(CHAT_WIDTH_MAX, Math.max(CHAT_WIDTH_MIN, parsed)));
+    const timer = window.setTimeout(() => {
+      const savedWidth = window.localStorage.getItem("predict-pal-chat-width");
+      if (!savedWidth) return;
+      const parsed = Number(savedWidth);
+      if (!Number.isFinite(parsed)) return;
+      setChatWidth(Math.min(CHAT_WIDTH_MAX, Math.max(CHAT_WIDTH_MIN, parsed)));
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem("forecast-buddy-chat-width", String(chatWidth));
+    window.localStorage.setItem("predict-pal-chat-width", String(chatWidth));
   }, [chatWidth]);
 
   const stopResize = useCallback(() => {
@@ -73,7 +78,11 @@ export default function BuildPage() {
   const onMouseMove = useCallback((event: MouseEvent) => {
     if (!isDraggingRef.current) return;
     const nextWidth = window.innerWidth - event.clientX;
-    const clamped = Math.min(CHAT_WIDTH_MAX, Math.max(CHAT_WIDTH_MIN, nextWidth));
+    const maxAllowed = Math.min(
+      CHAT_WIDTH_MAX,
+      Math.max(CHAT_WIDTH_MIN, window.innerWidth - MAIN_CONTENT_MIN_WIDTH)
+    );
+    const clamped = Math.min(maxAllowed, Math.max(CHAT_WIDTH_MIN, nextWidth));
     setChatWidth(clamped);
   }, []);
 
@@ -93,9 +102,9 @@ export default function BuildPage() {
   }, []);
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex">
+    <div className="min-h-[calc(100vh-4rem)] flex items-start">
       {/* Main Content */}
-      <div className="flex-1 max-w-4xl mx-auto px-6 py-8">
+      <div className="flex-1 w-full max-w-6xl mx-auto px-6 xl:px-8 py-8">
         {/* Step Progress Bar */}
         <div className="mb-8">
           <StepProgress
@@ -133,16 +142,16 @@ export default function BuildPage() {
 
       {/* Chat Sidebar */}
       <div
-        className="relative hidden lg:block border-l border-slate-800 bg-[#0a0e18]"
+        className="relative hidden lg:block h-[calc(100vh-4rem)] sticky top-16 self-start overflow-hidden border-l border-slate-700 bg-[#0a0e18] shadow-[-20px_0_40px_rgba(2,8,23,0.35)]"
         style={{ width: `${chatWidth}px` }}
       >
         <button
           type="button"
           aria-label="Resize chat sidebar"
           onMouseDown={startResize}
-          className="absolute left-0 top-0 h-full w-2 -translate-x-1/2 cursor-col-resize bg-transparent"
+          className="absolute left-0 top-0 h-full w-4 -translate-x-1/2 cursor-col-resize bg-transparent"
         >
-          <span className="absolute left-1/2 top-1/2 h-12 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-700/80 transition hover:bg-teal-500" />
+          <span className="absolute left-1/2 top-1/2 h-20 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-500/90 transition hover:bg-teal-400" />
         </button>
         <ChatSidebar />
       </div>
@@ -251,3 +260,4 @@ function DebugPanel() {
     </div>
   );
 }
+

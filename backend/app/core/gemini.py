@@ -7,6 +7,7 @@ for the Free Tier (rate limits + safety filters).
 
 import os
 import logging
+import asyncio
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ def _get_model_name() -> str:
 # ─── System prompt template ───────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
-You are **Forecast Buddy**, an expert yet friendly Data Scientist embedded \
+You are **Predict Pal**, an expert yet friendly Data Scientist embedded \
 inside a no-code ML forecasting tool.
 
 Rules:
@@ -56,6 +57,9 @@ Rules:
 - Use plain language a non-technical user can follow.
 - When data context is provided, reference specific numbers/columns.
 - Never fabricate data the user hasn't shared.
+- Treat the latest PAGE CONTEXT as the source of truth for UI choices and selected values.
+- If PAGE CONTEXT lists allowed option names, only use those names; do not invent or substitute alternatives.
+- If a value is "not selected yet", acknowledge that explicitly instead of assuming.
 - If asked something unrelated to data science, gently redirect.
 - Use markdown formatting for readability (bold, bullets, etc.) but keep it light.
 """
@@ -123,16 +127,35 @@ async def generate_chat_response(
 
         client = _get_client()
         model_name = _get_model_name()
-        response = await client.aio.models.generate_content(
-            model=model_name,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                thinking_config=types.ThinkingConfig(thinking_level="high"),
-            ),
-        )
+        response = None
+        # Retry once for transient provider overloads.
+        for attempt in range(2):
+            try:
+                response = await client.aio.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        thinking_config=types.ThinkingConfig(
+                            thinking_level="high" if attempt == 0 else "medium"
+                        ),
+                    ),
+                )
+                break
+            except Exception as gen_err:
+                err_text = str(gen_err).lower()
+                is_overload = (
+                    "503" in err_text
+                    or "unavailable" in err_text
+                    or "overloaded" in err_text
+                    or "model is overloaded" in err_text
+                )
+                if attempt == 0 and is_overload:
+                    await asyncio.sleep(1.0)
+                    continue
+                raise
 
         # Safety filter may block the response
-        if not response.text:
+        if not response or not response.text:
             return {
                 "role": "assistant",
                 "content": (
@@ -158,6 +181,19 @@ async def generate_chat_response(
                 "content": (
                     "⏳ I'm being rate-limited by the AI service. "
                     "Please wait about 30 seconds and try again!"
+                ),
+            }
+        if (
+            "503" in error_str
+            or "unavailable" in error_str
+            or "overloaded" in error_str
+            or "model is overloaded" in error_str
+        ):
+            return {
+                "role": "assistant",
+                "content": (
+                    "The AI provider is temporarily overloaded right now. "
+                    "Please retry in 20-60 seconds."
                 ),
             }
         if "safety" in error_str or "blocked" in error_str:
@@ -186,7 +222,7 @@ def _keyword_fallback(message: str) -> dict:
     msg = message.lower()
 
     if any(w in msg for w in ["hello", "hi", "hey"]):
-        reply = "Hey! I'm your Forecast Buddy. Upload a dataset and I'll help you explore patterns and build forecasts."
+        reply = "Hey! I'm your Predict Pal. Upload a dataset and I'll help you explore patterns and build forecasts."
     elif "upload" in msg or "file" in msg:
         reply = "You can drag and drop a CSV or Excel file in Step 1. I'll automatically detect date columns and numeric targets for you."
     elif "driver" in msg or "feature" in msg:
@@ -199,3 +235,4 @@ def _keyword_fallback(message: str) -> dict:
         reply = "I'm running in demo mode (no API key). Set GEMINI_API_KEY to unlock full AI responses!"
 
     return {"role": "assistant", "content": reply}
+

@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- Forecast Buddy — Supabase Schema
+-- Predict Pal — Supabase Schema
 -- Run this in Supabase SQL Editor to set up all tables.
 -- ═══════════════════════════════════════════════════════════════════════════
 
@@ -46,3 +46,4 @@ CREATE INDEX IF NOT EXISTS idx_datasets_project ON datasets(project_id);
 CREATE INDEX IF NOT EXISTS idx_model_configs_project ON model_configs(project_id);
 CREATE INDEX IF NOT EXISTS idx_chat_logs_project ON chat_logs(project_id);
 CREATE INDEX IF NOT EXISTS idx_chat_logs_created ON chat_logs(created_at);
+
