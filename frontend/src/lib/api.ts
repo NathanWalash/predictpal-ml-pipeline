@@ -101,17 +101,33 @@ export async function trainModel(
   projectId: string,
   dateCol: string,
   targetCol: string,
-  drivers: string[],
-  horizon: number,
-  driverOutlierStrategy: string
+  options: {
+    drivers: string[];
+    horizon: number;
+    baselineModel: string;
+    multivariateModel: string;
+    lagConfig: string;
+    autoSelectLags: boolean;
+    testWindowWeeks: number;
+    validationMode: string;
+    calendarFeatures: boolean;
+    holidayFeatures: boolean;
+  }
 ) {
   const res = await api.post("/train", {
     project_id: projectId,
     date_col: dateCol,
     target_col: targetCol,
-    drivers,
-    horizon,
-    driver_outlier_strategy: driverOutlierStrategy,
+    drivers: options.drivers,
+    horizon: options.horizon,
+    baseline_model: options.baselineModel,
+    multivariate_model: options.multivariateModel,
+    lag_config: options.lagConfig,
+    auto_select_lags: options.autoSelectLags,
+    test_window_weeks: options.testWindowWeeks,
+    validation_mode: options.validationMode,
+    calendar_features: options.calendarFeatures,
+    holiday_features: options.holidayFeatures,
   });
   return res.data;
 }
@@ -124,4 +140,65 @@ export async function sendChatMessage(projectId: string, message: string) {
     message,
   });
   return res.data;
+}
+
+export interface AnalysisManifest {
+  data_summary: {
+    target_name: string;
+    date_col: string;
+    start: string;
+    end: string;
+    rows: number;
+    freq: string;
+  };
+  settings: Record<string, unknown>;
+  metrics: {
+    baseline_rmse: number;
+    baseline_mae: number;
+    baseline_walk_forward_rmse: number;
+    multivariate_rmse: number;
+    multivariate_mae: number;
+    multivariate_walk_forward_rmse: number;
+    improvement_pct: number;
+  };
+  outputs: Record<string, string>;
+}
+
+export interface AnalysisBundle {
+  manifest: AnalysisManifest;
+  available: Record<string, boolean>;
+  datasets: {
+    forecast: Array<{
+      week_ending: string;
+      baseline_forecast: number;
+      multivariate_forecast: number;
+    }>;
+    test_predictions: Array<{
+      week_ending: string;
+      actual: number;
+      baseline: number;
+      multivariate: number;
+    }>;
+    feature_importance: Array<{
+      feature: string;
+      importance: number;
+    }>;
+    feature_frame: Array<Record<string, string | number | null>>;
+    target_series: Array<Record<string, string | number | null>>;
+    temp_weekly: Array<{
+      date: string;
+      temp_mean: number;
+    }>;
+    holiday_weekly: Array<{
+      week_ending?: string;
+      index?: string;
+      date?: string;
+      holiday_count: number;
+    }>;
+  };
+}
+
+export async function getSampleAnalysisBundle(): Promise<AnalysisBundle> {
+  const res = await api.get("/analysis/sample");
+  return res.data as AnalysisBundle;
 }

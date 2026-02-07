@@ -129,7 +129,7 @@ This file is **not** committed — create it locally. The default value above wo
 | Route | Description |
 |-------|-------------|
 | `/` | Landing page — hero, capabilities, how-it-works |
-| `/build` | 5-step wizard: Get Started → Process Data → Train → Outputs → Showcase |
+| `/create` | 5-step wizard: Get Started -> Process Data -> Train -> Analysis & Results -> Publish Story |
 | `/explore` | Browse published community projects |
 | `/about` | Mission, tech stack, credits |
 | `/login` | Simple username/password auth |

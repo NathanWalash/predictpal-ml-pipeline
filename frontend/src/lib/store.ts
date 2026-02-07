@@ -13,6 +13,15 @@ export interface ForecastResults {
   historical: { values: number[]; index: string[] };
   horizon: number;
   drivers_used: string[];
+  metrics?: Record<string, number>;
+  outputs?: Record<string, string>;
+  settings?: Record<string, unknown>;
+  test_predictions?: {
+    index: string[];
+    actual: number[];
+    baseline: number[];
+    multivariate: number[];
+  };
 }
 
 export interface ChatMessage {
@@ -127,12 +136,20 @@ interface BuildState {
   toggleLag: (lag: string) => void;
   calendarFeatures: boolean;
   setCalendarFeatures: (v: boolean) => void;
+  holidayFeatures: boolean;
+  setHolidayFeatures: (v: boolean) => void;
 
   // Step 3: Model
   horizon: number;
   setHorizon: (h: number) => void;
-  trainTestSplit: number;
-  setTrainTestSplit: (s: number) => void;
+  testWindowWeeks: number;
+  setTestWindowWeeks: (weeks: number) => void;
+  validationMode: string;
+  setValidationMode: (mode: string) => void;
+  lagConfig: string;
+  setLagConfig: (config: string) => void;
+  autoSelectLags: boolean;
+  setAutoSelectLags: (enabled: boolean) => void;
   baselineModel: string;
   setBaselineModel: (m: string) => void;
   multivariateModel: string;
@@ -142,8 +159,9 @@ interface BuildState {
   forecastResults: ForecastResults | null;
   setForecastResults: (results: ForecastResults) => void;
 
-  // Step 4: Outputs
+  // Step 4: Analysis
   widgets: { type: string; title: string; caption: string }[];
+  setWidgets: (widgets: { type: string; title: string; caption: string }[]) => void;
   addWidget: (w: { type: string; title: string; caption: string }) => void;
   removeWidget: (index: number) => void;
 
@@ -198,10 +216,14 @@ const buildInitial = {
   driverOutlierStrategy: "keep",
   selectedLags: [] as string[],
   calendarFeatures: false,
-  horizon: 12,
-  trainTestSplit: 80,
-  baselineModel: "",
-  multivariateModel: "",
+  holidayFeatures: false,
+  horizon: 8,
+  testWindowWeeks: 48,
+  validationMode: "walk_forward",
+  lagConfig: "1,2,4",
+  autoSelectLags: false,
+  baselineModel: "lagged_ridge",
+  multivariateModel: "gbm",
   selectedDrivers: [] as string[],
   forecastResults: null as ForecastResults | null,
   widgets: [] as { type: string; title: string; caption: string }[],
@@ -300,9 +322,13 @@ export const useBuildStore = create<BuildState>()((set) => ({
         : [...s.selectedLags, lag],
     })),
   setCalendarFeatures: (v) => set({ calendarFeatures: v }),
+  setHolidayFeatures: (v) => set({ holidayFeatures: v }),
 
   setHorizon: (h) => set({ horizon: h }),
-  setTrainTestSplit: (s) => set({ trainTestSplit: s }),
+  setTestWindowWeeks: (weeks) => set({ testWindowWeeks: weeks }),
+  setValidationMode: (mode) => set({ validationMode: mode }),
+  setLagConfig: (config) => set({ lagConfig: config }),
+  setAutoSelectLags: (enabled) => set({ autoSelectLags: enabled }),
   setBaselineModel: (m) => set({ baselineModel: m }),
   setMultivariateModel: (m) => set({ multivariateModel: m }),
   toggleDriver: (driver) =>
@@ -313,6 +339,7 @@ export const useBuildStore = create<BuildState>()((set) => ({
     })),
   setForecastResults: (results) => set({ forecastResults: results }),
 
+  setWidgets: (widgets) => set({ widgets }),
   addWidget: (w) => set((s) => ({ widgets: [...s.widgets, w] })),
   removeWidget: (index) =>
     set((s) => ({ widgets: s.widgets.filter((_, i) => i !== index) })),

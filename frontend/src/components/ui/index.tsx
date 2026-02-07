@@ -229,7 +229,7 @@ interface BubbleOption {
   id: string;
   label: string;
   description?: string;
-  icon?: string;
+  icon?: React.ReactNode;
 }
 
 interface BubbleSelectProps {
@@ -238,6 +238,9 @@ interface BubbleSelectProps {
   selected: string | string[];
   onSelect: (id: string) => void;
   multi?: boolean;
+  layout?: "wrap" | "grid";
+  columns?: 2 | 3 | 4;
+  fullWidth?: boolean;
 }
 
 export function BubbleSelect({
@@ -246,16 +249,26 @@ export function BubbleSelect({
   selected,
   onSelect,
   multi = false,
+  layout = "wrap",
+  columns = 2,
+  fullWidth = false,
 }: BubbleSelectProps) {
   const isSelected = (id: string) =>
     Array.isArray(selected) ? selected.includes(id) : selected === id;
+
+  const gridCols =
+    columns === 4 ? "grid-cols-4" : columns === 3 ? "grid-cols-3" : "grid-cols-2";
 
   return (
     <div className="space-y-3">
       {label && (
         <label className="text-sm font-medium text-slate-300">{label}</label>
       )}
-      <div className="flex flex-wrap gap-2">
+      <div
+        className={cn(
+          layout === "grid" ? `grid ${gridCols} gap-2` : "flex flex-wrap gap-2"
+        )}
+      >
         {options.map((opt) => (
           <button
             key={opt.id}
@@ -263,13 +276,14 @@ export function BubbleSelect({
             onClick={() => onSelect(opt.id)}
             className={cn(
               "bubble-option px-4 py-2.5 rounded-xl border text-sm font-medium transition-all cursor-pointer",
+              layout === "grid" && fullWidth && "w-full",
               isSelected(opt.id)
                 ? "active border-teal-500 bg-teal-500/10 text-teal-300"
                 : "border-slate-700 bg-slate-800/40 text-slate-400 hover:border-slate-600 hover:text-slate-300"
             )}
           >
             <div className="flex items-center gap-2">
-              {opt.icon && <span>{opt.icon}</span>}
+              {opt.icon && <span className="inline-flex items-center">{opt.icon}</span>}
               <span>{opt.label}</span>
             </div>
             {opt.description && (
