@@ -66,7 +66,7 @@ type GraphBlock = {
 type NotebookBlock = TextBlock | GraphBlock;
 
 const STAGES = [
-  { id: "setup" as StageId, label: "Start Prompt", icon: <Lightbulb className="w-4 h-4" /> },
+  { id: "setup" as StageId, label: "Story Setup", icon: <Lightbulb className="w-4 h-4" /> },
   { id: "compose" as StageId, label: "Notebook Builder", icon: <PenSquare className="w-4 h-4" /> },
   { id: "preview" as StageId, label: "Preview & Publish", icon: <Eye className="w-4 h-4" /> },
 ];
@@ -729,8 +729,8 @@ export default function Step5Showcase() {
         <h2 className="text-3xl font-bold text-white mb-3">Notebook Story Published</h2>
         <p className="text-slate-400 max-w-lg mb-8">&ldquo;{headline || projectTitle || "Forecast Notebook Post"}&rdquo; is ready.</p>
         <div className="flex gap-3">
-          <Button variant="secondary" onClick={() => (window.location.href = "/explore")}>View Explore</Button>
-          <Button onClick={() => (window.location.href = "/create")}>Build Another</Button>
+          <Button size="lg" variant="secondary" onClick={() => (window.location.href = "/explore")}>View Explore</Button>
+          <Button size="lg" onClick={() => (window.location.href = "/create")}>Build Another</Button>
         </div>
       </div>
     );
@@ -740,7 +740,7 @@ export default function Step5Showcase() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
         <h3 className="text-lg font-semibold text-white flex items-center gap-2"><PenSquare className="w-5 h-5 text-teal-400" />Publish Story</h3>
-        <p className="text-sm text-slate-400 mt-1">Notebook-style post with drag/drop blocks and real charts from Step 4 data.</p>
+        <p className="text-sm text-slate-400 mt-1">Build a clear story from your results using text and chart blocks, then publish to Explore.</p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-4">
           {STAGES.map((s, i) => (
             <button key={s.id} type="button" onClick={() => setStage(s.id)} className={`rounded-xl border px-3 py-3 text-left transition cursor-pointer ${stage === s.id ? "border-teal-500 bg-teal-500/10" : "border-slate-700 bg-slate-800/40 hover:border-slate-600"}`}>
@@ -753,15 +753,15 @@ export default function Step5Showcase() {
       {stage === "setup" && (
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 space-y-5">
           <div className="flex items-center justify-between">
-            <h4 className="text-white font-semibold text-base">Step 1: Start Prompt</h4>
-            <Button size="sm" variant="secondary" onClick={handleAISuggestSetup}><Sparkles className="w-3.5 h-3.5 mr-1" />AI Suggest (Stub)</Button>
+            <h4 className="text-white font-semibold text-base">Step 1: Create Your Story</h4>
+            <Button size="sm" variant="secondary" onClick={handleAISuggestSetup}><Sparkles className="w-3.5 h-3.5 mr-1" />AI Suggestion</Button>
           </div>
           <Input label="Headline" value={headline} onChange={(e) => setHeadline(e.target.value)} />
-          <Textarea label="Description" value={summary} onChange={(e) => setSummary(e.target.value)} rows={4} />
+          <Textarea label="Short Description" value={summary} onChange={(e) => setSummary(e.target.value)} rows={4} />
           <div className="space-y-3">
             <div>
               <p className="text-sm font-medium text-slate-300">Categories</p>
-              <p className="text-xs text-slate-500 mt-1">Choose one or more tags so people can find your post on Explore.</p>
+              <p className="text-xs text-slate-500 mt-1">Pick one or more categories so people can find your story faster.</p>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -818,11 +818,11 @@ export default function Step5Showcase() {
       {stage === "compose" && (
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h4 className="text-white font-semibold text-base">Step 2: Notebook Builder</h4>
+            <h4 className="text-white font-semibold text-base">Step 2: Build Your Notebook</h4>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="default">{blocks.length} blocks</Badge>
-              <Button size="sm" onClick={() => addTextBlock("body")}><Plus className="w-3.5 h-3.5 mr-1" />Add Text</Button>
-              <Button size="sm" variant="secondary" onClick={addGraphBlock}><Plus className="w-3.5 h-3.5 mr-1" />Add Graph</Button>
+              <Button onClick={() => addTextBlock("body")}><Plus className="w-3.5 h-3.5 mr-1" />Add Text Block</Button>
+              <Button variant="secondary" onClick={addGraphBlock}><Plus className="w-3.5 h-3.5 mr-1" />Add Graph Block</Button>
             </div>
           </div>
           {blocks.map((b, i) => (
@@ -854,7 +854,7 @@ export default function Step5Showcase() {
                       updateBlock(b.id, (x) => (x.type === "text" ? { ...x, content: next } : x))
                     }
                   />
-                  <Button size="sm" variant="secondary" onClick={() => handleAISuggestText(b.id)}><Sparkles className="w-3.5 h-3.5 mr-1" />AI Suggest Text (Stub)</Button>
+                  <Button size="sm" variant="secondary" onClick={() => handleAISuggestText(b.id)}><Sparkles className="w-3.5 h-3.5 mr-1" />AI Suggest Text</Button>
                 </div>
               )}
 
@@ -880,7 +880,7 @@ export default function Step5Showcase() {
                       updateBlock(b.id, (x) => (x.type === "graph" ? { ...x, caption: next } : x))
                     }
                   />
-                  <Button size="sm" variant="secondary" onClick={() => handleAICaption(b.id)}><Sparkles className="w-3.5 h-3.5 mr-1" />AI Caption (Stub)</Button>
+                  <Button size="sm" variant="secondary" onClick={() => handleAICaption(b.id)}><Sparkles className="w-3.5 h-3.5 mr-1" />AI Suggest Caption</Button>
                   {renderWindowControls(b)}
                   {renderGraph(b)}
                 </div>
@@ -893,7 +893,7 @@ export default function Step5Showcase() {
 
       {stage === "preview" && (
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 space-y-5">
-          <div className="flex items-center justify-between"><h4 className="text-white font-semibold text-base">Step 3: Preview and Publish</h4><Badge variant="success">Publishes to Explore</Badge></div>
+          <div className="flex items-center justify-between"><h4 className="text-white font-semibold text-base">Step 3: Preview and Publish</h4><Badge variant="success">Ready to publish</Badge></div>
           <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-5 space-y-4">
             <h5 className="text-2xl font-bold text-white">{headline || "Untitled Story"}</h5>
             <p className="text-sm text-slate-300">{summary}</p>
@@ -908,11 +908,11 @@ export default function Step5Showcase() {
       )}
 
       <div className="flex items-center justify-between">
-        <Button variant="secondary" onClick={prevStep}><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
+        <Button variant="secondary" onClick={prevStep} size="lg"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => setStage(stage === "preview" ? "compose" : stage === "compose" ? "setup" : "setup")} disabled={stage === "setup"}>Previous Stage</Button>
+          <Button size="lg" variant="secondary" onClick={() => setStage(stage === "preview" ? "compose" : stage === "compose" ? "setup" : "setup")} disabled={stage === "setup"}>Previous Step</Button>
           {stage !== "preview" ? (
-            <Button onClick={() => setStage(stage === "setup" ? "compose" : "preview")} disabled={stage === "setup" && (!headline.trim() || !summary.trim())}>Next Stage</Button>
+            <Button size="lg" onClick={() => setStage(stage === "setup" ? "compose" : "preview")} disabled={stage === "setup" && (!headline.trim() || !summary.trim())}>Next Step</Button>
           ) : (
             <Button onClick={handlePublish} disabled={isLoading || !headline.trim() || !summary.trim() || blocks.length === 0} size="lg">
               {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}Publish Story

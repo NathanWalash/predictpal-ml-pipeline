@@ -9,6 +9,7 @@ from app.core.preprocessing import (
     handle_outliers,
     validate_ready_for_ml,
 )
+from app.core.processing import parse_datetime_series
 
 
 def test_handle_missing_strategies_and_validation_errors():
@@ -170,3 +171,14 @@ def test_validate_ready_for_ml_catches_bad_data():
     assert any("infinite" in err.lower() for err in result["errors"])
     assert any("entirely" in err.lower() for err in result["errors"])
     assert len(result["warnings"]) == 1
+
+
+def test_parse_datetime_series_keeps_consistent_dayfirst_for_slash_dates():
+    # Mixed ambiguous/unambiguous slash dates should be parsed consistently.
+    values = pd.Series(["05/06/2015", "12/06/2015", "28/06/2015"])
+    parsed = parse_datetime_series(values)
+
+    # Expect dd/mm/yyyy interpretation:
+    # 05/06 -> 5 June, 12/06 -> 12 June, 28/06 -> 28 June
+    assert parsed.dt.month.tolist() == [6, 6, 6]
+    assert parsed.dt.day.tolist() == [5, 12, 28]

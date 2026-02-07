@@ -15,15 +15,26 @@ import {
   Hash,
   X,
   TrendingUp,
+  BriefcaseBusiness,
+  Zap,
+  HeartPulse,
+  Landmark,
+  Truck,
+  Wrench,
+  ArrowRight,
+  FolderUp,
+  Database,
+  ClipboardList,
+  Sparkles,
 } from "lucide-react";
 
 const USE_CASE_OPTIONS = [
-  { id: "retail", label: "Retail & Sales", icon: "🛒" },
-  { id: "energy", label: "Energy & Utilities", icon: "⚡" },
-  { id: "healthcare", label: "Healthcare", icon: "🏥" },
-  { id: "finance", label: "Finance", icon: "💰" },
-  { id: "supply-chain", label: "Supply Chain", icon: "📦" },
-  { id: "other", label: "Other", icon: "🔧" },
+  { id: "retail", label: "Retail & Sales", icon: <BriefcaseBusiness className="w-4 h-4" /> },
+  { id: "energy", label: "Energy & Utilities", icon: <Zap className="w-4 h-4" /> },
+  { id: "healthcare", label: "Healthcare", icon: <HeartPulse className="w-4 h-4" /> },
+  { id: "finance", label: "Finance", icon: <Landmark className="w-4 h-4" /> },
+  { id: "supply-chain", label: "Supply Chain", icon: <Truck className="w-4 h-4" /> },
+  { id: "other", label: "Other", icon: <Wrench className="w-4 h-4" /> },
 ];
 
 export default function Step1GetStarted() {
@@ -86,16 +97,18 @@ export default function Step1GetStarted() {
 
       try {
         // Create project if needed
-        if (!useBuildStore.getState().projectId && user) {
+        let activeProjectId = useBuildStore.getState().projectId;
+        if (!activeProjectId && user) {
           const proj = await createProject(
             user.user_id,
             projectTitle || file.name.replace(/\.[^.]+$/, ""),
             projectDescription
           );
           setProjectId(proj.project_id);
+          activeProjectId = proj.project_id;
         }
 
-        const result = await uploadFile(file, storedProjectId || undefined);
+        const result = await uploadFile(file, activeProjectId || undefined);
         if (result.project_id) {
           // Keep store project id aligned with backend upload state.
           setProjectId(result.project_id);
@@ -122,7 +135,6 @@ export default function Step1GetStarted() {
     },
     [
       user,
-      storedProjectId,
       projectTitle,
       projectDescription,
       setProjectId,
@@ -142,7 +154,11 @@ export default function Step1GetStarted() {
       setDriverErrorMsg("");
 
       try {
-        const result = await uploadDriverFile(file, storedProjectId || undefined);
+        const activeProjectId = useBuildStore.getState().projectId;
+        const result = await uploadDriverFile(file, activeProjectId || undefined);
+        if (result.project_id) {
+          setProjectId(result.project_id);
+        }
         setDriverInfo({
           fileName: file.name,
           columns: result.columns || [],
@@ -162,7 +178,7 @@ export default function Step1GetStarted() {
         setDriverLoading(false);
       }
     },
-    [storedProjectId, setDriverInfo]
+    [setDriverInfo, setProjectId]
   );
 
   const dropzoneAccept = {
@@ -201,9 +217,26 @@ export default function Step1GetStarted() {
 
   return (
     <div className="space-y-8">
+      <div className="rounded-2xl border border-slate-800 bg-gradient-to-r from-slate-900/80 to-slate-800/40 p-5">
+        <div className="flex items-start gap-3">
+          <div className="rounded-lg bg-teal-500/10 p-2 text-teal-300">
+            <ClipboardList className="w-5 h-5" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-white">Step 1: Project Setup</h2>
+            <p className="text-sm text-slate-400">
+              Give your project a name, then upload your main data to get started.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Project Details */}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 space-y-5">
-        <h3 className="text-lg font-semibold text-white">Project Details</h3>
+        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-teal-300" />
+          Project Details
+        </h3>
         <Input
           label="Project Title"
           placeholder="e.g. Weekly Sales Forecast"
@@ -211,8 +244,8 @@ export default function Step1GetStarted() {
           onChange={(e) => setProjectTitle(e.target.value)}
         />
         <Input
-          label="Description (optional)"
-          placeholder="What are you forecasting and why?"
+          label="Project Description (optional)"
+          placeholder="Tell us what you want to forecast"
           value={projectDescription}
           onChange={(e) => setProjectDescription(e.target.value)}
         />
@@ -221,12 +254,18 @@ export default function Step1GetStarted() {
           options={USE_CASE_OPTIONS}
           selected={useCase}
           onSelect={setUseCase}
+          layout="grid"
+          columns={2}
+          fullWidth
         />
       </div>
 
       {/* Upload */}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">Upload Data</h3>
+        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <FolderUp className="w-5 h-5 text-teal-300" />
+          Upload Data
+        </h3>
 
         <div
           {...getRootProps()}
@@ -240,11 +279,11 @@ export default function Step1GetStarted() {
           <Upload className="w-10 h-10 text-slate-500 mx-auto mb-3" />
           <p className="text-slate-400 font-medium">
             {isDragActive
-              ? "Drop it here!"
-              : "Drag & drop a CSV or Excel file, or click to browse"}
+              ? "Drop your file here"
+              : "Drag and drop a CSV or Excel file, or click to choose one"}
           </p>
           <p className="text-xs text-slate-600 mt-1">
-            Accepts .csv, .xlsx, and .xls files with a date column and at least one numeric column
+            Use a file with a date column and at least one number column
           </p>
         </div>
 
@@ -299,13 +338,16 @@ export default function Step1GetStarted() {
       {/* Optional Driver Upload */}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
         <div className="flex items-center gap-3 mb-4">
-          <h3 className="text-lg font-semibold text-white">Driver Data</h3>
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <Database className="w-5 h-5 text-blue-300" />
+            Driver Data
+          </h3>
           <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-500">
             Optional
           </span>
         </div>
         <p className="text-sm text-slate-500 mb-4">
-          Upload additional exogenous / driver variables (e.g. weather, promotions, economic indicators) to improve forecast accuracy.
+          Optional: add extra data like weather, promotions, or events to help the model learn.
         </p>
 
         {!driverFileName ? (
@@ -322,11 +364,11 @@ export default function Step1GetStarted() {
               <TrendingUp className="w-8 h-8 text-slate-500 mx-auto mb-2" />
               <p className="text-slate-400 font-medium text-sm">
                 {isDriverDragActive
-                  ? "Drop driver file here!"
-                  : "Drag & drop a driver data file, or click to browse"}
+                  ? "Drop driver file here"
+                  : "Drag and drop a driver file, or click to choose one"}
               </p>
               <p className="text-xs text-slate-600 mt-1">
-                Same formats supported — should share a date column with your main data
+                Use the same date format as your main dataset
               </p>
             </div>
 
@@ -401,7 +443,7 @@ export default function Step1GetStarted() {
                         >
                           <div>{col}</div>
                           <div className="text-[10px] font-normal text-slate-600 mt-0.5">
-                            {driverColumnDtypes[col] || "—"}
+                            {driverColumnDtypes[col] || "-"}
                           </div>
                         </th>
                       ))}
@@ -483,7 +525,7 @@ export default function Step1GetStarted() {
                     >
                       <div>{col}</div>
                       <div className="text-[10px] font-normal text-slate-600 mt-0.5">
-                        {columnDtypes[col] || "—"}
+                        {columnDtypes[col] || "-"}
                       </div>
                     </th>
                   ))}
@@ -518,9 +560,11 @@ export default function Step1GetStarted() {
       {/* Continue */}
       <div className="flex justify-end">
         <Button onClick={handleContinue} disabled={!canContinue} size="lg">
-          Continue to Process Data →
+          Continue to Process Data
+          <ArrowRight className="w-4 h-4 ml-2" />
         </Button>
       </div>
     </div>
   );
 }
+

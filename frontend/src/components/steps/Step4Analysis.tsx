@@ -413,12 +413,26 @@ export default function Step4Analysis() {
     }
 
     return (analysis?.datasets.temp_weekly || [])
-      .map((r) => ({
-        ts: parseTimestamp(r.date),
-        week_ending: r.date,
-        temp_mean: Number(r.temp_mean),
-        holiday_count: 0,
-      }))
+      .map((row) => {
+        const asRecord = row as LooseRecord;
+        const dateString = getDateString(asRecord);
+        if (!dateString) {
+          return null;
+        }
+        const tempRaw =
+          asRecord.temp_mean ??
+          asRecord.value ??
+          asRecord.temp ??
+          getPrimaryNumericValue(asRecord);
+        const temp = Number(tempRaw);
+        return {
+          ts: parseTimestamp(dateString),
+          week_ending: dateString,
+          temp_mean: Number.isFinite(temp) ? temp : 0,
+          holiday_count: 0,
+        };
+      })
+      .filter((r): r is { ts: number | null; week_ending: string; temp_mean: number; holiday_count: number } => r !== null)
       .filter((r): r is { ts: number; week_ending: string; temp_mean: number; holiday_count: number } => r.ts !== null)
       .map((r) => ({
         ...r,
@@ -503,7 +517,7 @@ export default function Step4Analysis() {
           <div>
             <h3 className="text-lg font-semibold text-white">Analysis & Results</h3>
             <p className="text-sm text-slate-400 mt-1">
-              A fixed walkthrough for non-technical users: check model quality first, then review forecast outputs.
+              Follow this in order: first check model quality, then review future forecasts.
             </p>
             <div className="flex flex-wrap items-center gap-2 mt-3">
               <Badge variant={loadError ? "warning" : "success"}>
@@ -516,10 +530,10 @@ export default function Step4Analysis() {
           <div className="rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-3 min-w-[250px]">
             <p className="text-xs font-semibold text-slate-300">Flow</p>
             <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-              <span className="text-slate-200 font-semibold">1.</span> Evaluation and metrics
+              <span className="text-slate-200 font-semibold">1.</span> Check model quality
             </p>
             <p className="text-xs text-slate-400 leading-relaxed">
-              <span className="text-slate-200 font-semibold">2.</span> Prediction and forecast
+              <span className="text-slate-200 font-semibold">2.</span> Review future forecast
             </p>
           </div>
         </div>
@@ -548,9 +562,9 @@ export default function Step4Analysis() {
         <div className="space-y-6">
           {showEvaluation && (
             <div className="rounded-2xl border border-sky-800/60 bg-sky-950/20 px-4 py-3">
-              <p className="text-sm font-semibold text-sky-300">Phase 1: Evaluation and Metrics (Train/Test)</p>
+              <p className="text-sm font-semibold text-sky-300">Phase 1: Check Model Quality</p>
               <p className="text-xs text-sky-200/80 mt-1">
-                Use this section to judge model quality on the held-out 20 percent test window.
+                These charts show how well the model performed on the held-out test period.
               </p>
             </div>
           )}
@@ -628,13 +642,13 @@ export default function Step4Analysis() {
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-slate-500 mb-1">
-                  X-axis: full timeline from `artifacts/target_series.csv`, with the final test region highlighted.
+                  X-axis: full timeline, with the final test period highlighted.
                 </p>
                 <p className="text-xs text-slate-500 mb-3">
-                  Y-axis: {targetLabel} count. Baseline and multivariate lines are only shown in the test window.
+                  Y-axis: {targetLabel} values. Model prediction lines appear in the test period.
                 </p>
                 <p className="text-xs text-slate-500 mb-3">
-                  Use Start and End selectors to focus on the period you want to inspect.
+                  Use Start and End to zoom into the period you want to inspect.
                 </p>
                 {testFitCombinedData.length === 0 ? (
                   <EmptyState text="No test_predictions data found." />
@@ -702,7 +716,7 @@ export default function Step4Analysis() {
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-slate-500 mb-3">
-                  Y-axis: absolute error in {targetLabel} units, computed from test predictions.
+                  Y-axis: prediction error size (lower is better).
                 </p>
                 {errorTrendData.length === 0 ? (
                   <EmptyState text="No test data available for error trend." />
@@ -744,8 +758,7 @@ export default function Step4Analysis() {
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-slate-500 mb-3">
-                  Y-axis lists feature names. X-axis is relative model importance from
-                  `artifacts/feature_importance.csv`.
+                  This shows which input features influenced the multivariate model most.
                 </p>
                 {featureImportanceData.length === 0 ? (
                   <EmptyState text="No feature importance data found." />
@@ -766,9 +779,9 @@ export default function Step4Analysis() {
 
           {showPrediction && (
             <div className="rounded-2xl border border-emerald-800/60 bg-emerald-950/20 px-4 py-3">
-              <p className="text-sm font-semibold text-emerald-300">Phase 2: Prediction and Forecast</p>
+              <p className="text-sm font-semibold text-emerald-300">Phase 2: Review Future Forecast</p>
               <p className="text-xs text-emerald-200/80 mt-1">
-                Use this section to review forward-looking forecasts generated after model training.
+                These charts show what the model predicts for upcoming weeks.
               </p>
             </div>
           )}
@@ -780,15 +793,13 @@ export default function Step4Analysis() {
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-slate-500 mb-1">
-                  X-axis: historical timeline from `artifacts/target_series.csv` plus future dates from
-                  `forecasts/forecast.csv`.
+                  X-axis: full timeline, including historical data and future forecast weeks.
                 </p>
                 <p className="text-xs text-slate-500 mb-3">
-                  Y-axis: {targetLabel} count. Historical actuals are shown up to now, then forecast lines continue
-                  forward.
+                  Y-axis: {targetLabel} values. Actual history is shown first, then forecast lines continue.
                 </p>
                 <p className="text-xs text-slate-500 mb-3">
-                  Use Start and End selectors to focus on just the forecast period or keep the full timeline.
+                  Use Start and End to focus on the forecast part or view the full timeline.
                 </p>
                 {forecastCombinedData.length === 0 ? (
                   <EmptyState text="No forecast data found." />
@@ -895,7 +906,7 @@ export default function Step4Analysis() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-xs text-slate-500 mb-3">
-                    Y-axis: weekly mean temperature from `artifacts/temp_weekly.csv`.
+                    Y-axis: weekly average temperature.
                   </p>
                   {driverData.length === 0 ? (
                     <EmptyState text="No temperature driver data found." />
@@ -946,7 +957,7 @@ export default function Step4Analysis() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-xs text-slate-500 mb-3">
-                    Y-axis: holiday count from `artifacts/holiday_weekly.csv`.
+                    Y-axis: number of holidays each week.
                   </p>
                   {driverData.length === 0 ? (
                     <EmptyState text="No holiday driver data found." />
@@ -1033,11 +1044,11 @@ export default function Step4Analysis() {
       )}
 
       <div className="flex items-center justify-between">
-        <Button variant="secondary" onClick={prevStep}>
-          {"<- Back"}
+        <Button variant="secondary" onClick={prevStep} size="lg">
+          {"Back to Training"}
         </Button>
         <Button onClick={handleContinue} size="lg">
-          {"Continue to Publish Story ->"}
+          {"Continue to Publish Story"}
         </Button>
       </div>
     </div>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -37,7 +38,7 @@ def prepare_series_and_drivers(
     drivers: list[str],
     calendar_features: bool,
     holiday_features: bool,
-) -> tuple[pd.Series, pd.DataFrame | None, pd.DataFrame | None]:
+) -> tuple[pd.Series, pd.DataFrame | None, pd.DataFrame | None, list[str]]:
     df = df.copy()
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
     df = df.dropna(subset=[date_col]).sort_values(date_col).reset_index(drop=True)
@@ -55,10 +56,12 @@ def prepare_series_and_drivers(
     target_series = df[target_col].dropna()
 
     drivers_df = None
+    selected_driver_cols: list[str] = []
     if drivers:
         driver_cols = [col for col in drivers if col in df.columns]
         if driver_cols:
             drivers_df = df[driver_cols].apply(coerce_numeric).reindex(target_series.index)
+            selected_driver_cols = driver_cols
 
     if holiday_features:
         holiday_df = build_holiday_features(target_series.index)
@@ -71,7 +74,7 @@ def prepare_series_and_drivers(
     if calendar_features:
         calendar_df = build_calendar_features(target_series.index)
 
-    return target_series, drivers_df, calendar_df
+    return target_series, drivers_df, calendar_df, selected_driver_cols
 
 
 def select_lags(
@@ -155,6 +158,11 @@ def forecast_future(
     model.fit(x_train, y_train)
 
     y_history = list(target_series.values)
+    driver_history: dict[str, list[float]] = {}
+    if drivers_df is not None and not drivers_df.empty:
+        for col in drivers_df.columns:
+            series = drivers_df[col].ffill().bfill()
+            driver_history[col] = [float(v) for v in series.values]
     baseline_forecasts = []
     multi_forecasts = []
 
@@ -174,6 +182,19 @@ def forecast_future(
             **{f"target_lag_{lag}": y_history[-lag] for lag in lags},
             **future_drivers.loc[idx].to_dict(),
         }
+        for feature in multivariate_features:
+            match = re.match(r"(.+)_lag_(\d+)$", feature)
+            if not match:
+                continue
+            base_col, lag_str = match.groups()
+            if base_col.startswith("target"):
+                continue
+            if base_col not in driver_history:
+                continue
+            lag = int(lag_str)
+            history_values = driver_history[base_col]
+            if len(history_values) >= lag:
+                multi_row[feature] = history_values[-lag]
         multi_features = np.array(
             [multi_row[col] for col in multivariate_features], dtype=float
         ).reshape(1, -1)
@@ -182,6 +203,8 @@ def forecast_future(
         baseline_forecasts.append(base_pred)
         multi_forecasts.append(multi_pred)
         y_history.append(multi_pred)
+        for col in driver_history:
+            driver_history[col].append(float(future_drivers.loc[idx, col]))
 
     return pd.DataFrame(
         {
@@ -216,7 +239,7 @@ def train_and_forecast(
     run_dir = output_dir or OUTPUTS_DIR
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    target_series, drivers_df, calendar_df = prepare_series_and_drivers(
+    target_series, drivers_df, calendar_df, selected_driver_cols = prepare_series_and_drivers(
         df,
         date_col,
         target_col,
@@ -242,7 +265,14 @@ def train_and_forecast(
         validation_mode=validation_mode,
     )
 
-    frame = build_feature_frame(target_series, drivers_df, calendar_df, lags)
+    frame = build_feature_frame(
+        target_series,
+        drivers_df,
+        calendar_df,
+        lags,
+        driver_lag_cols=selected_driver_cols,
+        driver_lags=[1, 2],
+    )
 
     eval_result = evaluate_split(
         frame,
@@ -278,23 +308,34 @@ def train_and_forecast(
         }
     )
 
+    inputs_dir = run_dir / "inputs"
+    inputs_dir.mkdir(parents=True, exist_ok=True)
+    # Keep parity with legacy artifacts bundle.
+    df.to_csv(inputs_dir / "target_raw.csv", index=False)
+
     if input_paths:
-        inputs_dir = run_dir / "inputs"
-        inputs_dir.mkdir(parents=True, exist_ok=True)
         for path in input_paths:
             if path.exists():
                 shutil.copy2(path, inputs_dir / path.name)
 
     artifacts_dir = run_dir / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
+    forecasts_dir = run_dir / "forecasts"
+    forecasts_dir.mkdir(parents=True, exist_ok=True)
 
-    forecast_path = run_dir / "forecast.csv"
+    forecast_path = forecasts_dir / "forecast.csv"
+    legacy_forecast_path = run_dir / "forecast.csv"
     test_path = artifacts_dir / "test_predictions.csv"
     importance_path = artifacts_dir / "feature_importance.csv"
     feature_frame_path = artifacts_dir / "feature_frame.csv"
+    target_series_path = artifacts_dir / "target_series.csv"
+    temp_weekly_path = artifacts_dir / "temp_weekly.csv"
+    holiday_weekly_path = artifacts_dir / "holiday_weekly.csv"
     analysis_path = run_dir / "analysis_result.json"
 
     forecast_df.to_csv(forecast_path, index=False)
+    # Backward compatibility for any code still reading outputs/forecast.csv.
+    forecast_df.to_csv(legacy_forecast_path, index=False)
     test_df.to_csv(test_path, index=False)
     eval_result["importances"].reset_index().rename(
         columns={"index": "feature", 0: "importance"}
@@ -302,6 +343,23 @@ def train_and_forecast(
     frame.reset_index().rename(columns={"index": "week_ending"}).to_csv(
         feature_frame_path, index=False
     )
+    target_series.to_frame(name="y").reset_index().rename(
+        columns={date_col: "week_ending", "index": "week_ending"}
+    ).to_csv(target_series_path, index=False)
+
+    if drivers_df is not None and "temp_mean" in drivers_df.columns:
+        drivers_df["temp_mean"].reset_index().rename(
+            columns={date_col: "week_ending", "index": "week_ending"}
+        ).to_csv(temp_weekly_path, index=False)
+
+    if drivers_df is not None and "holiday_count" in drivers_df.columns:
+        drivers_df["holiday_count"].reset_index().rename(
+            columns={date_col: "week_ending", "index": "week_ending"}
+        ).to_csv(holiday_weekly_path, index=False)
+    elif holiday_features:
+        build_holiday_features(target_series.index).reset_index().rename(
+            columns={date_col: "week_ending", "index": "week_ending"}
+        ).to_csv(holiday_weekly_path, index=False)
 
     metrics = {
         "baseline_rmse": eval_result["rmse_base"],
@@ -314,11 +372,15 @@ def train_and_forecast(
     }
 
     outputs = {
-        "forecast_csv": str(forecast_path),
-        "test_predictions_csv": str(test_path),
-        "feature_importance_csv": str(importance_path),
-        "feature_frame_csv": str(feature_frame_path),
-        "analysis_json": str(analysis_path),
+        "plot": "plots/model_fit.png",
+        "forecast_csv": "forecasts/forecast.csv",
+        "test_predictions_csv": "artifacts/test_predictions.csv",
+        "feature_importance_csv": "artifacts/feature_importance.csv",
+        "feature_frame_csv": "artifacts/feature_frame.csv",
+        "target_series_csv": "artifacts/target_series.csv",
+        "temp_weekly_csv": "artifacts/temp_weekly.csv",
+        "holiday_weekly_csv": "artifacts/holiday_weekly.csv",
+        "analysis_json": "analysis_result.json",
     }
 
     settings = {
@@ -337,6 +399,14 @@ def train_and_forecast(
 
     analysis_result = {
         "generated_at": datetime.utcnow().isoformat(),
+        "data_summary": {
+            "target_name": target_col,
+            "date_col": date_col,
+            "start": target_series.index.min().strftime("%Y-%m-%d"),
+            "end": target_series.index.max().strftime("%Y-%m-%d"),
+            "rows": int(len(target_series)),
+            "freq": str(pd.infer_freq(target_series.index) or "W-SUN"),
+        },
         "settings": settings,
         "metrics": metrics,
         "outputs": outputs,

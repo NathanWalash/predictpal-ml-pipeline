@@ -275,19 +275,19 @@ export function BubbleSelect({
             type="button"
             onClick={() => onSelect(opt.id)}
             className={cn(
-              "bubble-option px-4 py-2.5 rounded-xl border text-sm font-medium transition-all cursor-pointer",
+              "bubble-option px-4 py-2.5 rounded-xl border text-sm font-medium transition-all cursor-pointer text-left",
               layout === "grid" && fullWidth && "w-full",
               isSelected(opt.id)
                 ? "active border-teal-500 bg-teal-500/10 text-teal-300"
                 : "border-slate-700 bg-slate-800/40 text-slate-400 hover:border-slate-600 hover:text-slate-300"
             )}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-start gap-2">
               {opt.icon && <span className="inline-flex items-center">{opt.icon}</span>}
               <span>{opt.label}</span>
             </div>
             {opt.description && (
-              <p className="text-xs mt-1 opacity-70">{opt.description}</p>
+              <p className="text-xs mt-1 opacity-70 text-left">{opt.description}</p>
             )}
           </button>
         ))}
