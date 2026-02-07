@@ -504,7 +504,19 @@ export default function Step4Analysis() {
 
   const fmt = new Intl.NumberFormat("en-GB");
   const pct = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
-  const targetLabel = analysis?.manifest.data_summary.target_name || "Target";
+  const dataSummary = analysis?.manifest?.data_summary;
+  const settings = analysis?.manifest?.settings || {};
+  const metrics = analysis?.manifest?.metrics;
+  const targetLabel = dataSummary?.target_name || "Target";
+  const startLabel = dataSummary?.start || "N/A";
+  const endLabel = dataSummary?.end || "N/A";
+  const rowsLabel = typeof dataSummary?.rows === "number" ? dataSummary.rows : 0;
+  const freqLabel = dataSummary?.freq || "N/A";
+  const baselineModelLabel = settings.baseline_model ? String(settings.baseline_model) : "N/A";
+  const multivariateModelLabel = settings.multi_model ? String(settings.multi_model) : "N/A";
+  const baselineRmse = Number(metrics?.baseline_rmse);
+  const multivariateRmse = Number(metrics?.multivariate_rmse);
+  const improvementPct = Number(metrics?.improvement_pct);
   const evaluationSectionIds = ["summary", "metrics", "test-fit", "error-trend", "feature-importance"];
   const predictionSectionIds = ["future-forecast", "driver-series", "forecast-table"];
   const showEvaluation = selectedSections.some((id) => evaluationSectionIds.includes(id));
@@ -578,24 +590,22 @@ export default function Step4Analysis() {
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
                   <InfoCard
                     label="Target"
-                    value={analysis.manifest.data_summary.target_name}
+                    value={targetLabel}
                     help="This is the thing we are trying to predict each week."
                   />
                   <InfoCard
                     label="Date range"
-                    value={`${analysis.manifest.data_summary.start} to ${analysis.manifest.data_summary.end}`}
+                    value={`${startLabel} to ${endLabel}`}
                     help="This is the period used for training and evaluation."
                   />
                   <InfoCard
                     label="Rows and freq"
-                    value={`${analysis.manifest.data_summary.rows} rows, ${analysis.manifest.data_summary.freq}`}
+                    value={`${rowsLabel} rows, ${freqLabel}`}
                     help="Rows are weekly points. More rows generally means more stable training."
                   />
                   <InfoCard
                     label="Models"
-                    value={`${String(analysis.manifest.settings.baseline_model)} + ${String(
-                      analysis.manifest.settings.multi_model
-                    )}`}
+                    value={`${baselineModelLabel} + ${multivariateModelLabel}`}
                     help="Baseline is the simpler reference model. Multivariate uses extra driver signals."
                   />
                 </div>
@@ -608,19 +618,19 @@ export default function Step4Analysis() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <KpiCard
                   title="Baseline RMSE"
-                  value={fmt.format(analysis.manifest.metrics.baseline_rmse)}
+                  value={Number.isFinite(baselineRmse) ? fmt.format(baselineRmse) : "N/A"}
                   tone="neutral"
                   explanation="Average prediction error size for the baseline model. Lower is better."
                 />
                 <KpiCard
                   title="Multivariate RMSE"
-                  value={fmt.format(analysis.manifest.metrics.multivariate_rmse)}
+                  value={Number.isFinite(multivariateRmse) ? fmt.format(multivariateRmse) : "N/A"}
                   tone="success"
                   explanation="Average prediction error size for the advanced model. Lower is better."
                 />
                 <KpiCard
                   title="Improvement"
-                  value={`${pct.format(analysis.manifest.metrics.improvement_pct)}%`}
+                  value={Number.isFinite(improvementPct) ? `${pct.format(improvementPct)}%` : "N/A"}
                   tone="success"
                   explanation="How much the multivariate model reduced RMSE compared with baseline."
                 />

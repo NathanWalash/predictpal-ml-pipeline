@@ -109,7 +109,7 @@ export default function Step3TrainForecast() {
     dateCol,
     detectedDateCol,
     targetCol,
-    driverFileName,
+    driverFiles,
     driverNumericColumns,
     selectedDrivers,
     toggleDriver,
@@ -277,10 +277,13 @@ export default function Step3TrainForecast() {
           <TrendingUp className="w-5 h-5 text-teal-300" />
           Optional Drivers
         </h3>
-        {driverFileName ? (
+        {driverFiles.length > 0 ? (
           <>
             <p className="text-sm text-slate-400">
-              Driver source: <span className="text-slate-300">{driverFileName}</span>
+              Driver source{driverFiles.length !== 1 ? "s" : ""}:{" "}
+              <span className="text-slate-300">
+                {driverFiles.map((f) => f.fileName).join(", ")}
+              </span>
             </p>
             {driverNumericColumns.length > 0 ? (
               <BubbleSelect

@@ -34,6 +34,16 @@ export interface UserInfo {
   username: string;
 }
 
+export interface DriverFileInfo {
+  fileName: string;
+  columns: string[];
+  numericColumns: string[];
+  detectedDateCol: string | null;
+  rowCount: number;
+  previewData: Record<string, unknown>[];
+  columnDtypes: Record<string, string>;
+}
+
 // ─── Auth Store ───────────────────────────────────────────────────────────────
 
 interface AuthState {
@@ -91,14 +101,9 @@ interface BuildState {
   columnDtypes: Record<string, string>;
 
   // Driver file (optional)
-  driverFileName: string | null;
-  driverColumns: string[];
+  driverFiles: DriverFileInfo[];
   driverNumericColumns: string[];
-  driverDetectedDateCol: string | null;
-  driverRowCount: number;
-  driverPreviewData: Record<string, unknown>[];
-  driverColumnDtypes: Record<string, string>;
-  setDriverInfo: (info: {
+  addDriverInfo: (info: {
     fileName: string;
     columns: string[];
     numericColumns: string[];
@@ -107,6 +112,8 @@ interface BuildState {
     previewData?: Record<string, unknown>[];
     columnDtypes?: Record<string, string>;
   }) => void;
+  setDriverInfos: (infos: DriverFileInfo[]) => void;
+  removeDriverInfo: (fileName: string) => void;
   clearDriverInfo: () => void;
   setFileInfo: (info: {
     columns: string[];
@@ -200,13 +207,8 @@ const buildInitial = {
   rowCount: 0,
   previewData: [] as Record<string, unknown>[],
   columnDtypes: {} as Record<string, string>,
-  driverFileName: null as string | null,
-  driverColumns: [] as string[],
+  driverFiles: [] as DriverFileInfo[],
   driverNumericColumns: [] as string[],
-  driverDetectedDateCol: null as string | null,
-  driverRowCount: 0,
-  driverPreviewData: [] as Record<string, unknown>[],
-  driverColumnDtypes: {} as Record<string, string>,
   dateCol: null as string | null,
   targetCol: null as string | null,
   frequency: "",
@@ -277,25 +279,46 @@ export const useBuildStore = create<BuildState>()((set) => ({
       columnDtypes: {},
     }),
 
-  setDriverInfo: (info) =>
+  addDriverInfo: (info) =>
+    set((s) => {
+      const nextInfo: DriverFileInfo = {
+        fileName: info.fileName,
+        columns: info.columns,
+        numericColumns: info.numericColumns,
+        detectedDateCol: info.detectedDateCol,
+        rowCount: info.rowCount,
+        previewData: info.previewData || [],
+        columnDtypes: info.columnDtypes || {},
+      };
+      const existing = s.driverFiles.filter((f) => f.fileName !== nextInfo.fileName);
+      const driverFiles = [...existing, nextInfo];
+      const driverNumericColumns = Array.from(
+        new Set(driverFiles.flatMap((f) => f.numericColumns))
+      );
+      return { driverFiles, driverNumericColumns };
+    }),
+  setDriverInfos: (infos) =>
     set({
-      driverFileName: info.fileName,
-      driverColumns: info.columns,
-      driverNumericColumns: info.numericColumns,
-      driverDetectedDateCol: info.detectedDateCol,
-      driverRowCount: info.rowCount,
-      driverPreviewData: info.previewData || [],
-      driverColumnDtypes: info.columnDtypes || {},
+      driverFiles: infos,
+      driverNumericColumns: Array.from(new Set(infos.flatMap((f) => f.numericColumns))),
+    }),
+  removeDriverInfo: (fileName) =>
+    set((s) => {
+      const driverFiles = s.driverFiles.filter((f) => f.fileName !== fileName);
+      const driverNumericColumns = Array.from(
+        new Set(driverFiles.flatMap((f) => f.numericColumns))
+      );
+      return {
+        driverFiles,
+        driverNumericColumns,
+        selectedDrivers: s.selectedDrivers.filter((d) => driverNumericColumns.includes(d)),
+      };
     }),
   clearDriverInfo: () =>
     set({
-      driverFileName: null,
-      driverColumns: [],
+      driverFiles: [],
       driverNumericColumns: [],
-      driverDetectedDateCol: null,
-      driverRowCount: 0,
-      driverPreviewData: [],
-      driverColumnDtypes: {},
+      selectedDrivers: [],
     }),
 
   setFileInfo: (info) =>
@@ -354,4 +377,3 @@ export const useBuildStore = create<BuildState>()((set) => ({
 
   reset: () => set(buildInitial),
 }));
-
