@@ -11,8 +11,8 @@ import json
 from pathlib import Path
 from typing import Any
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from pathlib import Path
 from pydantic import BaseModel
-import pandas as pd
 
 from app.core.processing import (
     detect_date_column,
@@ -20,14 +20,18 @@ from app.core.processing import (
     validate_frequency,
     get_data_health,
     load_dataframe,
+    get_preview,
 )
+from app.core.training import train_and_forecast
 from app.core.forecasting import run_forecast
+from app.core.preprocessing import clean_dataframe_for_training
 
 router = APIRouter()
 
 # In-memory stores for demo
 _projects: dict = {}
 _dataframes: dict = {}
+_driver_dataframes: dict = {}  # project_id -> driver DataFrame
 _users: dict = {}  # username -> {password_hash, user_id}
 _user_projects: dict = {}  # user_id -> [project_ids]
 _analysis_dir = Path(__file__).resolve().parent.parent / "outputs_temp"
@@ -88,7 +92,15 @@ class TrainRequest(BaseModel):
     date_col: str
     target_col: str
     drivers: list[str] = []
-    horizon: int = 12
+    horizon: int = 8
+    baseline_model: str = "lagged_ridge"
+    multivariate_model: str = "gbm"
+    lag_config: str = "1,2,4"
+    auto_select_lags: bool = False
+    test_window_weeks: int = 48
+    validation_mode: str = "walk_forward"
+    calendar_features: bool = False
+    holiday_features: bool = False
 
 
 class ChatRequest(BaseModel):
@@ -98,10 +110,47 @@ class ChatRequest(BaseModel):
 
 # ─── Upload ────────────────────────────────────────────────────────────────────
 
+_ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".txt"}
+
+
+def _validate_upload(filename: str | None) -> str:
+    """Return the lowered extension or raise 400 if unsupported."""
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Accepted: {', '.join(sorted(_ALLOWED_EXTENSIONS))}",
+        )
+    return ext
+
+
+def _validate_dataframe(df: pd.DataFrame, label: str = "file") -> None:
+    """Sanity-check a parsed DataFrame — reject garbage."""
+    if df.empty:
+        raise HTTPException(status_code=400, detail=f"The {label} appears to be empty after parsing.")
+    if len(df.columns) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The {label} only has {len(df.columns)} column(s). Need at least 2 (e.g. a date and a value).",
+        )
+    if len(df) < 3:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The {label} only has {len(df)} row(s) of data. Need at least 3 to be useful.",
+        )
+    # Check that most cells aren't null (a sign of bad parsing)
+    fill_rate = df.notna().mean().mean()
+    if fill_rate < 0.3:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The {label} is mostly empty ({fill_rate:.0%} of cells are filled). It may not be a valid tabular file.",
+        )
+
 
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    """Receive a CSV/Excel file and create a project."""
+    """Receive a CSV/Excel/TXT file and create a project."""
+    _validate_upload(file.filename)
     project_id = str(uuid.uuid4())
 
     # Save file temporarily
@@ -117,6 +166,8 @@ async def upload_file(file: UploadFile = File(...)):
         os.unlink(tmp.name)
         raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
 
+    _validate_dataframe(df, "uploaded file")
+
     # Detect date column
     date_col = detect_date_column(df)
     numeric_cols = detect_numeric_columns(df)
@@ -130,6 +181,8 @@ async def upload_file(file: UploadFile = File(...)):
     }
     _dataframes[project_id] = df
 
+    preview = get_preview(df, n=10)
+
     return {
         "project_id": project_id,
         "file_name": file.filename,
@@ -137,6 +190,53 @@ async def upload_file(file: UploadFile = File(...)):
         "columns": df.columns.tolist(),
         "detected_date_col": date_col,
         "numeric_columns": numeric_cols,
+        "preview": preview["rows"],
+        "dtypes": preview["dtypes"],
+    }
+
+
+# ─── Upload Drivers ────────────────────────────────────────────────────────────
+
+
+@router.post("/upload-drivers")
+async def upload_driver_file(
+    file: UploadFile = File(...),
+    project_id: str | None = None,
+):
+    """Receive an optional CSV/Excel/TXT file containing driver / exogenous data."""
+    _validate_upload(file.filename)
+    pid = project_id or str(uuid.uuid4())
+
+    suffix = os.path.splitext(file.filename or ".csv")[1]
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    content = await file.read()
+    tmp.write(content)
+    tmp.close()
+
+    try:
+        df = load_dataframe(tmp.name)
+    except Exception as e:
+        os.unlink(tmp.name)
+        raise HTTPException(status_code=400, detail=f"Failed to parse driver file: {e}")
+
+    _validate_dataframe(df, "driver file")
+
+    date_col = detect_date_column(df)
+    numeric_cols = detect_numeric_columns(df)
+
+    _driver_dataframes[pid] = df
+
+    preview = get_preview(df, n=10)
+
+    return {
+        "project_id": pid,
+        "file_name": file.filename,
+        "rows": len(df),
+        "columns": df.columns.tolist(),
+        "detected_date_col": date_col,
+        "numeric_columns": numeric_cols,
+        "preview": preview["rows"],
+        "dtypes": preview["dtypes"],
     }
 
 
@@ -224,25 +324,39 @@ async def train_model(req: TrainRequest):
     if req.project_id not in _dataframes:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    df = _dataframes[req.project_id].copy()
+    raw_df = _dataframes[req.project_id].copy()
+    try:
+        df, prep_report = clean_dataframe_for_training(
+            raw_df,
+            date_col=req.date_col,
+            target_col=req.target_col,
+            driver_cols=None,
+            min_rows=20,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Preprocessing error: {e}")
 
-    if req.date_col not in df.columns:
-        raise HTTPException(status_code=400, detail=f"Date column '{req.date_col}' not found")
-    if req.target_col not in df.columns:
-        raise HTTPException(status_code=400, detail=f"Target column '{req.target_col}' not found")
+    if not prep_report["ready"]["ready"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Data not ready for training: {prep_report['ready']['errors']}",
+        )
+
+    date_col = prep_report["date_col"]
+    target_col = prep_report["target_col"]
 
     # Prepare time series
-    df[req.date_col] = pd.to_datetime(df[req.date_col])
-    df = df.sort_values(req.date_col).reset_index(drop=True)
-    df = df.set_index(req.date_col)
+    df = df.sort_values(date_col).reset_index(drop=True)
+    df = df.set_index(date_col)
 
     # Infer frequency
     freq = pd.infer_freq(df.index)
     if freq is None:
         freq = "W"
     df = df.asfreq(freq)
+    df[target_col] = df[target_col].interpolate(method="linear").ffill().bfill()
 
-    series = df[req.target_col].dropna().astype(float)
+    series = df[target_col].dropna().astype(float)
 
     if len(series) < 20:
         raise HTTPException(
@@ -251,19 +365,25 @@ async def train_model(req: TrainRequest):
         )
 
     try:
-        results = run_forecast(
-            series=series,
+        results = train_and_forecast(
+            df=df,
+            project_id=req.project_id,
+            date_col=req.date_col,
+            target_col=req.target_col,
+            drivers=req.drivers,
             horizon=req.horizon,
-            drivers=req.drivers if req.drivers else None,
+            baseline_model=req.baseline_model,
+            multivariate_model=req.multivariate_model,
+            lag_config=req.lag_config,
+            auto_select_lags=req.auto_select_lags,
+            test_window_weeks=req.test_window_weeks,
+            validation_mode=req.validation_mode,
+            calendar_features=req.calendar_features,
+            holiday_features=req.holiday_features,
+            input_paths=[Path(_projects[req.project_id]["file_path"])],
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Forecasting error: {e}")
-
-    # Attach historical data for charting
-    results["historical"] = {
-        "values": series.tolist(),
-        "index": series.index.strftime("%Y-%m-%d").tolist(),
-    }
 
     return results
 

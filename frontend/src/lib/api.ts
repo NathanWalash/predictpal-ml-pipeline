@@ -70,6 +70,16 @@ export async function uploadFile(file: File) {
   return res.data;
 }
 
+export async function uploadDriverFile(file: File, projectId?: string) {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (projectId) formData.append("project_id", projectId);
+  const res = await api.post("/upload-drivers", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return res.data;
+}
+
 // ─── Analyze ──────────────────────────────────────────────────────────────────
 
 export async function analyzeData(
@@ -91,15 +101,33 @@ export async function trainModel(
   projectId: string,
   dateCol: string,
   targetCol: string,
-  drivers: string[],
-  horizon: number
+  options: {
+    drivers: string[];
+    horizon: number;
+    baselineModel: string;
+    multivariateModel: string;
+    lagConfig: string;
+    autoSelectLags: boolean;
+    testWindowWeeks: number;
+    validationMode: string;
+    calendarFeatures: boolean;
+    holidayFeatures: boolean;
+  }
 ) {
   const res = await api.post("/train", {
     project_id: projectId,
     date_col: dateCol,
     target_col: targetCol,
-    drivers,
-    horizon,
+    drivers: options.drivers,
+    horizon: options.horizon,
+    baseline_model: options.baselineModel,
+    multivariate_model: options.multivariateModel,
+    lag_config: options.lagConfig,
+    auto_select_lags: options.autoSelectLags,
+    test_window_weeks: options.testWindowWeeks,
+    validation_mode: options.validationMode,
+    calendar_features: options.calendarFeatures,
+    holiday_features: options.holidayFeatures,
   });
   return res.data;
 }
