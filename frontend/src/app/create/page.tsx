@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useBuildStore } from "@/lib/store";
 import StepProgress from "@/components/steps/StepProgress";
 import Step1GetStarted from "@/components/steps/Step1GetStarted";
@@ -34,12 +35,58 @@ const STEP_COMPONENTS: Record<number, React.ReactNode> = {
   5: <Step5Showcase />,
 };
 
+const CHAT_WIDTH_DEFAULT = 360;
+const CHAT_WIDTH_MIN = 280;
+const CHAT_WIDTH_MAX = 640;
+
 export default function BuildPage() {
   const currentStep = useBuildStore((s) => s.currentStep);
   const completedSteps = useBuildStore((s) => s.completedSteps);
   const debugMode = useBuildStore((s) => s.debugMode);
   const toggleDebug = useBuildStore((s) => s.toggleDebug);
   const setStep = useBuildStore((s) => s.setStep);
+  const [chatWidth, setChatWidth] = useState(CHAT_WIDTH_DEFAULT);
+  const isDraggingRef = useRef(false);
+
+  useEffect(() => {
+    const savedWidth = window.localStorage.getItem("forecast-buddy-chat-width");
+    if (!savedWidth) return;
+    const parsed = Number(savedWidth);
+    if (!Number.isFinite(parsed)) return;
+    setChatWidth(Math.min(CHAT_WIDTH_MAX, Math.max(CHAT_WIDTH_MIN, parsed)));
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("forecast-buddy-chat-width", String(chatWidth));
+  }, [chatWidth]);
+
+  const stopResize = useCallback(() => {
+    isDraggingRef.current = false;
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+  }, []);
+
+  const onMouseMove = useCallback((event: MouseEvent) => {
+    if (!isDraggingRef.current) return;
+    const nextWidth = window.innerWidth - event.clientX;
+    const clamped = Math.min(CHAT_WIDTH_MAX, Math.max(CHAT_WIDTH_MIN, nextWidth));
+    setChatWidth(clamped);
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", stopResize);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", stopResize);
+    };
+  }, [onMouseMove, stopResize]);
+
+  const startResize = useCallback(() => {
+    isDraggingRef.current = true;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  }, []);
 
   return (
     <div className="min-h-[calc(100vh-4rem)] flex">
@@ -77,7 +124,18 @@ export default function BuildPage() {
       </div>
 
       {/* Chat Sidebar */}
-      <div className="hidden lg:block w-80 border-l border-slate-800 bg-[#0a0e18]">
+      <div
+        className="relative hidden lg:block border-l border-slate-800 bg-[#0a0e18]"
+        style={{ width: `${chatWidth}px` }}
+      >
+        <button
+          type="button"
+          aria-label="Resize chat sidebar"
+          onMouseDown={startResize}
+          className="absolute left-0 top-0 h-full w-2 -translate-x-1/2 cursor-col-resize bg-transparent"
+        >
+          <span className="absolute left-1/2 top-1/2 h-12 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-700/80 transition hover:bg-teal-500" />
+        </button>
         <ChatSidebar />
       </div>
     </div>
