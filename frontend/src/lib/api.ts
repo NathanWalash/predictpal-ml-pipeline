@@ -141,3 +141,64 @@ export async function sendChatMessage(projectId: string, message: string) {
   });
   return res.data;
 }
+
+export interface AnalysisManifest {
+  data_summary: {
+    target_name: string;
+    date_col: string;
+    start: string;
+    end: string;
+    rows: number;
+    freq: string;
+  };
+  settings: Record<string, unknown>;
+  metrics: {
+    baseline_rmse: number;
+    baseline_mae: number;
+    baseline_walk_forward_rmse: number;
+    multivariate_rmse: number;
+    multivariate_mae: number;
+    multivariate_walk_forward_rmse: number;
+    improvement_pct: number;
+  };
+  outputs: Record<string, string>;
+}
+
+export interface AnalysisBundle {
+  manifest: AnalysisManifest;
+  available: Record<string, boolean>;
+  datasets: {
+    forecast: Array<{
+      week_ending: string;
+      baseline_forecast: number;
+      multivariate_forecast: number;
+    }>;
+    test_predictions: Array<{
+      week_ending: string;
+      actual: number;
+      baseline: number;
+      multivariate: number;
+    }>;
+    feature_importance: Array<{
+      feature: string;
+      importance: number;
+    }>;
+    feature_frame: Array<Record<string, string | number | null>>;
+    target_series: Array<Record<string, string | number | null>>;
+    temp_weekly: Array<{
+      date: string;
+      temp_mean: number;
+    }>;
+    holiday_weekly: Array<{
+      week_ending?: string;
+      index?: string;
+      date?: string;
+      holiday_count: number;
+    }>;
+  };
+}
+
+export async function getSampleAnalysisBundle(): Promise<AnalysisBundle> {
+  const res = await api.get("/analysis/sample");
+  return res.data as AnalysisBundle;
+}

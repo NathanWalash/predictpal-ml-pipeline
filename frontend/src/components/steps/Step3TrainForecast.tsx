@@ -337,7 +337,7 @@ export default function Step3TrainForecast() {
           disabled={status !== "success"}
           size="lg"
         >
-          Continue to Outputs →
+          Continue to Analysis →
         </Button>
       </div>
     </div>

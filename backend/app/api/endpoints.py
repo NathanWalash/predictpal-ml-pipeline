@@ -7,6 +7,9 @@ import os
 import uuid
 import hashlib
 import tempfile
+import json
+from pathlib import Path
+from typing import Any
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pathlib import Path
 from pydantic import BaseModel
@@ -31,12 +34,31 @@ _dataframes: dict = {}
 _driver_dataframes: dict = {}  # project_id -> driver DataFrame
 _users: dict = {}  # username -> {password_hash, user_id}
 _user_projects: dict = {}  # user_id -> [project_ids]
+_analysis_dir = Path(__file__).resolve().parent.parent / "outputs_temp"
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
 
 def _hash_pw(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
+
+
+def _resolve_analysis_path(path_value: str, fallback: str) -> Path:
+    raw = path_value or fallback
+    candidate = (_analysis_dir / raw).resolve()
+    if not str(candidate).startswith(str(_analysis_dir.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid analysis file path")
+    return candidate
+
+
+def _csv_records(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    df = pd.read_csv(path)
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            df[col] = df[col].dt.strftime("%Y-%m-%d")
+    return df.where(pd.notna(df), None).to_dict(orient="records")
 
 
 # ─── Auth Models ───────────────────────────────────────────────────────────────
@@ -243,6 +265,57 @@ async def analyze_data(req: AnalyzeRequest):
 
 
 # ─── Train ─────────────────────────────────────────────────────────────────────
+
+
+@router.get("/analysis/sample")
+async def get_analysis_sample():
+    """
+    Load a precomputed analysis bundle (json + csv artifacts) for Step 4.
+    This lets the frontend render analysis views without retraining.
+    """
+    manifest_path = _analysis_dir / "analysis_result.json"
+    if not manifest_path.exists():
+        raise HTTPException(status_code=404, detail="analysis_result.json not found")
+
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    outputs = manifest.get("outputs", {})
+
+    forecast_path = _resolve_analysis_path(outputs.get("forecast_csv", ""), "forecasts/forecast.csv")
+    test_pred_path = _resolve_analysis_path(outputs.get("test_predictions_csv", ""), "artifacts/test_predictions.csv")
+    feature_importance_path = _resolve_analysis_path(
+        outputs.get("feature_importance_csv", ""),
+        "artifacts/feature_importance.csv",
+    )
+    feature_frame_path = _resolve_analysis_path(outputs.get("feature_frame_csv", ""), "artifacts/feature_frame.csv")
+    target_series_path = _resolve_analysis_path(outputs.get("target_series_csv", ""), "artifacts/target_series.csv")
+    temp_weekly_path = _resolve_analysis_path(outputs.get("temp_weekly_csv", ""), "artifacts/temp_weekly.csv")
+    holiday_weekly_path = _resolve_analysis_path(outputs.get("holiday_weekly_csv", ""), "artifacts/holiday_weekly.csv")
+    plot_path = _resolve_analysis_path(outputs.get("plot", ""), "plots/model_fit.png")
+
+    return {
+        "manifest": manifest,
+        "available": {
+            "plot": plot_path.exists(),
+            "forecast": forecast_path.exists(),
+            "test_predictions": test_pred_path.exists(),
+            "feature_importance": feature_importance_path.exists(),
+            "feature_frame": feature_frame_path.exists(),
+            "target_series": target_series_path.exists(),
+            "temp_weekly": temp_weekly_path.exists(),
+            "holiday_weekly": holiday_weekly_path.exists(),
+        },
+        "datasets": {
+            "forecast": _csv_records(forecast_path),
+            "test_predictions": _csv_records(test_pred_path),
+            "feature_importance": _csv_records(feature_importance_path),
+            "feature_frame": _csv_records(feature_frame_path),
+            "target_series": _csv_records(target_series_path),
+            "temp_weekly": _csv_records(temp_weekly_path),
+            "holiday_weekly": _csv_records(holiday_weekly_path),
+        },
+    }
 
 
 @router.post("/train")

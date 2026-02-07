@@ -229,7 +229,7 @@ interface BubbleOption {
   id: string;
   label: string;
   description?: string;
-  icon?: string;
+  icon?: React.ReactNode;
 }
 
 interface BubbleSelectProps {
@@ -283,7 +283,7 @@ export function BubbleSelect({
             )}
           >
             <div className="flex items-center gap-2">
-              {opt.icon && <span>{opt.icon}</span>}
+              {opt.icon && <span className="inline-flex items-center">{opt.icon}</span>}
               <span>{opt.label}</span>
             </div>
             {opt.description && (

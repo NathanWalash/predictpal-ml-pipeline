@@ -155,8 +155,9 @@ interface BuildState {
   forecastResults: ForecastResults | null;
   setForecastResults: (results: ForecastResults) => void;
 
-  // Step 4: Outputs
+  // Step 4: Analysis
   widgets: { type: string; title: string; caption: string }[];
+  setWidgets: (widgets: { type: string; title: string; caption: string }[]) => void;
   addWidget: (w: { type: string; title: string; caption: string }) => void;
   removeWidget: (index: number) => void;
 
@@ -330,6 +331,7 @@ export const useBuildStore = create<BuildState>()((set) => ({
     })),
   setForecastResults: (results) => set({ forecastResults: results }),
 
+  setWidgets: (widgets) => set({ widgets }),
   addWidget: (w) => set((s) => ({ widgets: [...s.widgets, w] })),
   removeWidget: (index) =>
     set((s) => ({ widgets: s.widgets.filter((_, i) => i !== index) })),

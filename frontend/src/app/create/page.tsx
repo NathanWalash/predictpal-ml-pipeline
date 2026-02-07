@@ -5,7 +5,7 @@ import StepProgress from "@/components/steps/StepProgress";
 import Step1GetStarted from "@/components/steps/Step1GetStarted";
 import Step2ProcessData from "@/components/steps/Step2ProcessData";
 import Step3TrainForecast from "@/components/steps/Step3TrainForecast";
-import Step4Outputs from "@/components/steps/Step4Outputs";
+import Step4Analysis from "@/components/steps/Step4Analysis";
 import Step5Showcase from "@/components/steps/Step5Showcase";
 import ChatSidebar from "@/components/ChatSidebar";
 import {
@@ -22,15 +22,15 @@ const STEPS = [
   { label: "Get Started", icon: <Upload className="w-4 h-4" /> },
   { label: "Process Data", icon: <Cpu className="w-4 h-4" /> },
   { label: "Train & Forecast", icon: <BarChart3 className="w-4 h-4" /> },
-  { label: "Outputs", icon: <FileText className="w-4 h-4" /> },
-  { label: "Showcase", icon: <Trophy className="w-4 h-4" /> },
+  { label: "Analysis & Results", icon: <FileText className="w-4 h-4" /> },
+  { label: "Publish Story", icon: <Trophy className="w-4 h-4" /> },
 ];
 
 const STEP_COMPONENTS: Record<number, React.ReactNode> = {
   1: <Step1GetStarted />,
   2: <Step2ProcessData />,
   3: <Step3TrainForecast />,
-  4: <Step4Outputs />,
+  4: <Step4Analysis />,
   5: <Step5Showcase />,
 };
 
