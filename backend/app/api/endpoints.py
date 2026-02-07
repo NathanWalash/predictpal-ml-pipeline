@@ -27,6 +27,7 @@ from app.core.processing import (
 )
 from app.core.training import train_and_forecast
 from app.core.preprocessing import clean_dataframe_for_training
+from app.core.gemini import generate_chat_response
 from app.core.paths import OUTPUTS_DIR
 
 router = APIRouter()
@@ -231,6 +232,9 @@ class ProcessRequest(BaseModel):
 class ChatRequest(BaseModel):
     project_id: str
     message: str
+    page_context: str = ""
+    history: list[dict] = []
+    report_data: str | None = None
 
 
 # ─── Upload ────────────────────────────────────────────────────────────────────
@@ -738,31 +742,15 @@ async def train_model(req: TrainRequest):
 @router.post("/chat")
 async def chat(req: ChatRequest):
     """
-    Simple chat endpoint. Returns contextual responses.
-    In production, wire this to an LLM with project context.
+    Context-aware chat endpoint powered by Gemini 1.5 Flash.
+    Falls back to keyword matching when GEMINI_API_KEY is not set.
     """
-    project = _projects.get(req.project_id)
-
-    # Demo contextual responses
-    msg = req.message.lower()
-
-    if any(w in msg for w in ["hello", "hi", "hey"]):
-        reply = "Hey! I'm your Forecast Buddy. Upload a dataset and I'll help you explore patterns and build forecasts. What data are you working with?"
-    elif "upload" in msg or "file" in msg:
-        reply = "You can drag and drop a CSV or Excel file in Step 1. I'll automatically detect date columns and numeric targets for you."
-    elif "driver" in msg or "feature" in msg:
-        reply = "Drivers are external factors that might influence your data — like seasonality, holidays, or temperature. Toggle them on in Step 3 to see if they improve the forecast!"
-    elif "accuracy" in msg or "improve" in msg:
-        reply = "The multivariate model adds external drivers on top of the baseline. If a driver like 'holidays' captures real variation, you'll see the green line track reality better than the blue dashed baseline."
-    elif "forecast" in msg or "predict" in msg:
-        reply = "Once you've selected your columns and drivers, hit 'Run Forecast'. I'll train two models — a simple baseline and a gradient-boosted one with your chosen drivers."
-    else:
-        reply = f"Interesting question! I'm a demo buddy right now, so my answers are limited. In the full version, I'd use an LLM to give you deep insights about your data and forecasts."
-
-    return {
-        "role": "assistant",
-        "content": reply,
-    }
+    return await generate_chat_response(
+        message=req.message,
+        page_context=req.page_context,
+        report_data=req.report_data,
+        history=req.history,
+    )
 
 
 # ─── Auth ──────────────────────────────────────────────────────────────────────

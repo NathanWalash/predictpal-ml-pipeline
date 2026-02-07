@@ -156,11 +156,16 @@ export async function trainModel(
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
 
-export async function sendChatMessage(projectId: string, message: string) {
-  const res = await api.post("/chat", {
-    project_id: projectId,
-    message,
-  });
+export interface ChatPayload {
+  project_id: string;
+  message: string;
+  page_context?: string;
+  history?: { role: string; content: string }[];
+  report_data?: string | null;
+}
+
+export async function sendChatMessage(payload: ChatPayload) {
+  const res = await api.post("/chat", payload);
   return res.data;
 }
 
