@@ -113,7 +113,7 @@ interface BuildState {
   forecastResults: ForecastResults | null;
   setForecastResults: (results: ForecastResults) => void;
 
-  // Step 4: Outputs
+  // Step 4: Analysis
   widgets: { type: string; title: string; caption: string }[];
   addWidget: (w: { type: string; title: string; caption: string }) => void;
   removeWidget: (index: number) => void;
