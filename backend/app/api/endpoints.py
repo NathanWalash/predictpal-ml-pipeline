@@ -78,10 +78,47 @@ class ChatRequest(BaseModel):
 
 # ─── Upload ────────────────────────────────────────────────────────────────────
 
+_ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".txt"}
+
+
+def _validate_upload(filename: str | None) -> str:
+    """Return the lowered extension or raise 400 if unsupported."""
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Accepted: {', '.join(sorted(_ALLOWED_EXTENSIONS))}",
+        )
+    return ext
+
+
+def _validate_dataframe(df: pd.DataFrame, label: str = "file") -> None:
+    """Sanity-check a parsed DataFrame — reject garbage."""
+    if df.empty:
+        raise HTTPException(status_code=400, detail=f"The {label} appears to be empty after parsing.")
+    if len(df.columns) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The {label} only has {len(df.columns)} column(s). Need at least 2 (e.g. a date and a value).",
+        )
+    if len(df) < 3:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The {label} only has {len(df)} row(s) of data. Need at least 3 to be useful.",
+        )
+    # Check that most cells aren't null (a sign of bad parsing)
+    fill_rate = df.notna().mean().mean()
+    if fill_rate < 0.3:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The {label} is mostly empty ({fill_rate:.0%} of cells are filled). It may not be a valid tabular file.",
+        )
+
 
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    """Receive a CSV/Excel file and create a project."""
+    """Receive a CSV/Excel/TXT file and create a project."""
+    _validate_upload(file.filename)
     project_id = str(uuid.uuid4())
 
     # Save file temporarily
@@ -96,6 +133,8 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         os.unlink(tmp.name)
         raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
+
+    _validate_dataframe(df, "uploaded file")
 
     # Detect date column
     date_col = detect_date_column(df)
@@ -132,7 +171,8 @@ async def upload_driver_file(
     file: UploadFile = File(...),
     project_id: str | None = None,
 ):
-    """Receive an optional CSV/Excel file containing driver / exogenous data."""
+    """Receive an optional CSV/Excel/TXT file containing driver / exogenous data."""
+    _validate_upload(file.filename)
     pid = project_id or str(uuid.uuid4())
 
     suffix = os.path.splitext(file.filename or ".csv")[1]
@@ -146,6 +186,8 @@ async def upload_driver_file(
     except Exception as e:
         os.unlink(tmp.name)
         raise HTTPException(status_code=400, detail=f"Failed to parse driver file: {e}")
+
+    _validate_dataframe(df, "driver file")
 
     date_col = detect_date_column(df)
     numeric_cols = detect_numeric_columns(df)

@@ -107,18 +107,26 @@ def get_data_health(df: pd.DataFrame) -> dict:
 
 def load_dataframe(file_path: str) -> pd.DataFrame:
     """
-    Load CSV or Excel file into a DataFrame.
+    Load CSV, Excel, or delimited text file into a DataFrame.
 
     Automatically detects and strips metadata preambles (title blocks,
     summary sections, provenance info) that appear before the real data
     table.  Handles multi-row merged Excel headers by flattening them
-    into single-level column names.
+    into single-level column names.  For .txt files the delimiter is
+    auto-detected.
     """
     is_excel = file_path.endswith((".xlsx", ".xls"))
+    is_txt = file_path.endswith(".txt")
 
     # ── First pass: raw load (no header) so we can inspect structure ──
     if is_excel:
         raw = pd.read_excel(file_path, header=None)
+    elif is_txt:
+        # Count leading blank lines so the CSV sniffer doesn't choke
+        skip = _count_leading_blanks(file_path)
+        raw = pd.read_csv(
+            file_path, header=None, sep=r"\s+", engine="python", skiprows=skip
+        )
     else:
         raw = pd.read_csv(file_path, header=None)
 
@@ -131,6 +139,11 @@ def load_dataframe(file_path: str) -> pd.DataFrame:
     # ── Second pass: reload with the correct header row(s) ──
     if is_excel:
         df = pd.read_excel(file_path, header=header)
+    elif is_txt:
+        h = header if isinstance(header, int) else header[0]
+        df = pd.read_csv(
+            file_path, header=h, sep=r"\s+", engine="python", skiprows=skip
+        )
     else:
         # CSV doesn't have merged cells, so always use a single int
         h = header if isinstance(header, int) else header[0]
@@ -167,6 +180,17 @@ def load_dataframe(file_path: str) -> pd.DataFrame:
 
 
 # ── Header-detection helpers ───────────────────────────────────────────────
+
+
+def _count_leading_blanks(file_path: str) -> int:
+    """Return the number of blank / whitespace-only lines at the top of a text file."""
+    count = 0
+    with open(file_path, "r", errors="replace") as f:
+        for line in f:
+            if line.strip():
+                break
+            count += 1
+    return count
 
 
 def _looks_clean(raw: pd.DataFrame) -> bool:

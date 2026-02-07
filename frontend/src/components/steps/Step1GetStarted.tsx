@@ -164,6 +164,7 @@ export default function Step1GetStarted() {
     "text/csv": [".csv"],
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
     "application/vnd.ms-excel": [".xls"],
+    "text/plain": [".txt"],
   };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
