@@ -61,9 +61,10 @@ export async function updateProject(
 
 // ─── Upload ───────────────────────────────────────────────────────────────────
 
-export async function uploadFile(file: File) {
+export async function uploadFile(file: File, projectId?: string) {
   const formData = new FormData();
   formData.append("file", file);
+  if (projectId) formData.append("project_id", projectId);
   const res = await api.post("/upload", formData, {
     headers: { "Content-Type": "multipart/form-data" },
   });
@@ -91,6 +92,27 @@ export async function analyzeData(
     project_id: projectId,
     date_col: dateCol,
     target_col: targetCol,
+  });
+  return res.data;
+}
+
+export async function processData(options: {
+  projectId: string;
+  dateCol: string;
+  targetCol: string;
+  frequency: string;
+  driverDateCol?: string;
+  outlierStrategy: string;
+  driverOutlierStrategy: string;
+}) {
+  const res = await api.post("/process", {
+    project_id: options.projectId,
+    date_col: options.dateCol,
+    target_col: options.targetCol,
+    frequency: options.frequency,
+    driver_date_col: options.driverDateCol,
+    outlier_strategy: options.outlierStrategy,
+    driver_outlier_strategy: options.driverOutlierStrategy,
   });
   return res.data;
 }

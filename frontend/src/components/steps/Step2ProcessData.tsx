@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { useBuildStore } from "@/lib/store";
-import { BubbleSelect, Toggle, Button, Input } from "@/components/ui";
+import { processData } from "@/lib/api";
+import { BubbleSelect, Button, Input } from "@/components/ui";
 
 const FREQUENCY_OPTIONS = [
   { id: "D", label: "Daily", icon: "📅" },
@@ -27,15 +29,6 @@ const OUTLIER_STRATEGY_OPTIONS = [
   { id: "keep", label: "Keep All", icon: "✅", description: "Don't treat outliers" },
 ];
 
-const LAG_OPTIONS = [
-  { id: "1", label: "t-1", description: "One step back" },
-  { id: "7", label: "t-7", description: "One week" },
-  { id: "14", label: "t-14", description: "Two weeks" },
-  { id: "30", label: "t-30", description: "One month" },
-  { id: "90", label: "t-90", description: "One quarter" },
-  { id: "365", label: "t-365", description: "One year" },
-];
-
 export default function Step2ProcessData() {
   const {
     columns,
@@ -55,14 +48,34 @@ export default function Step2ProcessData() {
     setOutlierStrategy,
     driverOutlierStrategy,
     setDriverOutlierStrategy,
-    selectedLags,
-    toggleLag,
-    calendarFeatures,
-    setCalendarFeatures,
     completeStep,
     nextStep,
     prevStep,
+    projectId,
+    setFileInfo,
+    setDriverInfo,
+    clearDriverInfo,
+    setLoading,
+    setLoadingMessage,
+    driverColumns,
+    driverDetectedDateCol,
+    driverRowCount,
+    driverPreviewData,
+    driverColumnDtypes,
   } = useBuildStore();
+  const [processError, setProcessError] = useState("");
+  const getApiErrorMessage = (err: unknown) => {
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      "response" in err &&
+      typeof (err as { response?: unknown }).response === "object" &&
+      (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+    ) {
+      return (err as { response: { data: { detail: string } } }).response.data.detail;
+    }
+    return "Failed to process data.";
+  };
 
   const dateColOptions = columns.map((c) => ({
     id: c,
@@ -77,8 +90,7 @@ export default function Step2ProcessData() {
     icon: "📈",
   }));
 
-  const canContinue =
-    (dateCol || detectedDateCol) && targetCol && frequency && missingStrategy;
+  const canContinue = Boolean((dateCol || detectedDateCol) && targetCol && projectId);
 
   const normalizedOutlierStrategy =
     outlierStrategy === "clip"
@@ -94,7 +106,56 @@ export default function Step2ProcessData() {
         ? "keep"
         : driverOutlierStrategy;
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
+    if (!projectId || !targetCol || !(dateCol || detectedDateCol)) return;
+    const resolvedDateCol = dateCol || detectedDateCol;
+    if (!resolvedDateCol) return;
+
+    setLoading(true);
+    setLoadingMessage("Applying Step 2 processing...");
+    setProcessError("");
+
+    try {
+      const result = await processData({
+        projectId,
+        dateCol: resolvedDateCol,
+        targetCol,
+        frequency: frequency || "W",
+        driverDateCol: driverDetectedDateCol || undefined,
+        outlierStrategy: outlierStrategy || "keep",
+        driverOutlierStrategy: driverOutlierStrategy || "keep",
+      });
+      setDateCol(result.detected_date_col || resolvedDateCol);
+      setTargetCol(result.target_col || targetCol);
+      setFileInfo({
+        columns: result.columns || [],
+        numericColumns: result.numeric_columns || [],
+        detectedDateCol: result.detected_date_col || null,
+        rowCount: result.rows || 0,
+        previewData: result.preview || [],
+        columnDtypes: result.dtypes || {},
+      });
+      if (result.driver?.file_name) {
+        setDriverInfo({
+          fileName: result.driver.file_name,
+          columns: driverColumns || [],
+          numericColumns: result.driver.numeric_columns || [],
+          detectedDateCol: driverDetectedDateCol || null,
+          rowCount: driverRowCount || 0,
+          previewData: driverPreviewData || [],
+          columnDtypes: driverColumnDtypes || {},
+        });
+      } else {
+        clearDriverInfo();
+      }
+    } catch (err: unknown) {
+      setProcessError(getApiErrorMessage(err));
+      return;
+    } finally {
+      setLoading(false);
+      setLoadingMessage("");
+    }
+
     if (!dateCol && detectedDateCol) setDateCol(detectedDateCol);
     completeStep(2);
     nextStep();
@@ -164,26 +225,12 @@ export default function Step2ProcessData() {
         )}
       </div>
 
-      {/* Feature Engineering */}
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 space-y-6">
-        <h3 className="text-lg font-semibold text-white">Feature Engineering</h3>
-
-        <BubbleSelect
-          label="Lag Features"
-          options={LAG_OPTIONS}
-          selected={selectedLags}
-          onSelect={toggleLag}
-          multi
-        />
-
-        <Toggle
-          checked={calendarFeatures}
-          onChange={setCalendarFeatures}
-          label="Add calendar features (day-of-week, month, quarter, etc.)"
-        />
-      </div>
-
       {/* Navigation */}
+      {processError && (
+        <div className="rounded-xl border border-red-900/50 bg-red-950/30 px-4 py-3 text-sm text-red-300">
+          {processError}
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <Button variant="secondary" onClick={prevStep}>
           ← Back

@@ -9,6 +9,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+from app.core.processing import parse_datetime_series
 
 
 # ============== CLEANING ==============
@@ -472,15 +473,30 @@ def clean_dataframe_for_training(
 
     target_nan_before = int(result[target_col_clean].isna().sum())
 
-    result[date_col_clean] = pd.to_datetime(result[date_col_clean], errors="coerce")
+    result[date_col_clean] = parse_datetime_series(result[date_col_clean])
     invalid_dates = int(result[date_col_clean].isna().sum())
     result = result.dropna(subset=[date_col_clean])
+    if result.empty:
+        raise ValueError(
+            f"No rows left after parsing '{date_col}' as dates. "
+            "Check that you selected the correct date column."
+        )
+
+    # Re-drop empty columns after date filtering; many wide health datasets
+    # keep values only on rows that may be removed as invalid dates.
+    result = result.dropna(axis=1, how="all")
+    if target_col_clean not in result.columns:
+        raise ValueError(
+            f"Target column '{target_col}' has no usable values after date cleanup. "
+            "Pick a different target column."
+        )
 
     result[target_col_clean] = _coerce_numeric(result[target_col_clean])
 
     numeric_driver_cols: list[str] = []
     categorical_driver_cols: list[str] = []
 
+    driver_cols_clean = [col for col in driver_cols_clean if col in result.columns]
     for col in driver_cols_clean:
         candidate_numeric = _coerce_numeric(result[col])
         numeric_ratio = float(candidate_numeric.notna().mean()) if len(result) else 0.0
@@ -533,6 +549,14 @@ def clean_dataframe_for_training(
 
     if outlier_action != "keep":
         result = handle_outliers(result, target_col_clean, action=outlier_action, method="iqr")
+
+    # Final safety pass after coercion/filling/outlier handling.
+    result = result.dropna(axis=1, how="all")
+    if target_col_clean not in result.columns:
+        raise ValueError(
+            f"Target column '{target_col}' became empty after preprocessing. "
+            "Pick a different target column."
+        )
 
     target_nan_after = int(result[target_col_clean].isna().sum())
     rows_removed = initial_rows - len(result)
