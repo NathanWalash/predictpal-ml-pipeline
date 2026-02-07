@@ -17,6 +17,7 @@ from app.core.processing import (
     validate_frequency,
     get_data_health,
     load_dataframe,
+    get_preview,
 )
 from app.core.forecasting import run_forecast
 
@@ -108,6 +109,8 @@ async def upload_file(file: UploadFile = File(...)):
     }
     _dataframes[project_id] = df
 
+    preview = get_preview(df, n=10)
+
     return {
         "project_id": project_id,
         "file_name": file.filename,
@@ -115,6 +118,8 @@ async def upload_file(file: UploadFile = File(...)):
         "columns": df.columns.tolist(),
         "detected_date_col": date_col,
         "numeric_columns": numeric_cols,
+        "preview": preview["rows"],
+        "dtypes": preview["dtypes"],
     }
 
 
