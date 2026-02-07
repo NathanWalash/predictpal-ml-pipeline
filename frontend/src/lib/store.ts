@@ -49,7 +49,7 @@ export const useAuthStore = create<AuthState>()(
       setUser: (user) => set({ user }),
       logout: () => set({ user: null }),
     }),
-    { name: "forecast-buddy-auth" }
+    { name: "predict-pal-auth" }
   )
 );
 
@@ -234,7 +234,7 @@ const buildInitial = {
   chatMessages: [
     {
       role: "assistant" as const,
-      content: "Welcome! I'm your Forecast Buddy. Start by creating a project and uploading your data.",
+      content: "Welcome! I'm your Predict Pal. Start by creating a project and uploading your data.",
     },
   ],
 };
@@ -354,3 +354,4 @@ export const useBuildStore = create<BuildState>()((set) => ({
 
   reset: () => set(buildInitial),
 }));
+

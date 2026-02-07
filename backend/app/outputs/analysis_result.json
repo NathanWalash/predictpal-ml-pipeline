@@ -1,0 +1,33 @@
+{
+  "generated_at": "2026-02-07T22:16:37.570324",
+  "settings": {
+    "baseline_model": "lagged_ridge",
+    "multivariate_model": "gbm",
+    "lags": [
+      1,
+      2,
+      4
+    ],
+    "test_window_weeks": 48,
+    "validation_mode": "walk_forward",
+    "forecast_horizon": 8,
+    "calendar_features": false,
+    "auto_select_lags": false
+  },
+  "metrics": {
+    "baseline_rmse": 11396.563671067504,
+    "baseline_mae": 8884.670733580924,
+    "baseline_walk_forward_rmse": 12431.71303838271,
+    "multivariate_rmse": 12393.092111518978,
+    "multivariate_mae": 9425.364579019233,
+    "multivariate_walk_forward_rmse": 13454.811062128867,
+    "improvement_pct": -8.744113306551899
+  },
+  "outputs": {
+    "forecast_csv": "C:\\Users\\calle\\OneDrive\\Documents\\Uni work\\Hackathon\\LeedsHack2026\\backend\\app\\outputs\\forecast.csv",
+    "test_predictions_csv": "C:\\Users\\calle\\OneDrive\\Documents\\Uni work\\Hackathon\\LeedsHack2026\\backend\\app\\outputs\\artifacts\\test_predictions.csv",
+    "feature_importance_csv": "C:\\Users\\calle\\OneDrive\\Documents\\Uni work\\Hackathon\\LeedsHack2026\\backend\\app\\outputs\\artifacts\\feature_importance.csv",
+    "feature_frame_csv": "C:\\Users\\calle\\OneDrive\\Documents\\Uni work\\Hackathon\\LeedsHack2026\\backend\\app\\outputs\\artifacts\\feature_frame.csv",
+    "analysis_json": "C:\\Users\\calle\\OneDrive\\Documents\\Uni work\\Hackathon\\LeedsHack2026\\backend\\app\\outputs\\analysis_result.json"
+  }
+}

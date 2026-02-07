@@ -26,7 +26,7 @@ export function Header() {
             <BarChart3 className="w-4.5 h-4.5 text-teal-400" />
           </div>
           <span className="font-bold text-lg text-white tracking-tight">
-            Forecast<span className="text-teal-400">Buddy</span>
+            Predict<span className="text-teal-400">Pal</span>
           </span>
         </Link>
 

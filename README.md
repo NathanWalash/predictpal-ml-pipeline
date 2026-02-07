@@ -1,8 +1,8 @@
-﻿# ForecastBuddy
+# PredictPal
 
-A guided time-series forecasting workbench. Upload data, configure processing, train models, build reports, and publish — all through a friendly step-by-step UI.
+A guided time-series forecasting workbench. Upload data, configure processing, train models, build reports, and publish � all through a friendly step-by-step UI.
 
-**Stack:** Next.js 16 · Tailwind CSS 4 · Zustand · FastAPI · skforecast · Supabase (optional)
+**Stack:** Next.js 16 � Tailwind CSS 4 � Zustand � FastAPI � skforecast � Supabase (optional)
 
 ---
 
@@ -12,7 +12,7 @@ A guided time-series forecasting workbench. Upload data, configure processing, t
 |------|---------|-------|
 | **Node.js** | 20+ | `node -v` |
 | **npm** | 10+ | `npm -v` |
-| **Python** | 3.10 – 3.12 | `python --version` |
+| **Python** | 3.10 � 3.12 | `python --version` |
 | **pip** | latest | `pip --version` |
 
 ---
@@ -20,22 +20,22 @@ A guided time-series forecasting workbench. Upload data, configure processing, t
 ## Repo Structure
 
 ```
-├── backend/             # FastAPI server
-│   ├── app/
-│   │   ├── main.py          # Entry point, CORS
-│   │   ├── api/endpoints.py # All routes (upload, analyze, train, chat, auth)
-│   │   └── core/            # processing.py, forecasting.py, config.py
-│   ├── requirements.txt
-│   ├── .env.example
-│   └── Dockerfile
-├── frontend/            # Next.js app
-│   ├── src/
-│   │   ├── app/             # Pages: /, /build, /explore, /about, /login
-│   │   ├── components/      # Header, ChatSidebar, build steps, UI kit
-│   │   └── lib/             # store.ts, api.ts, utils.ts
-│   └── package.json
-├── supabase_schema.sql  # Optional DB schema
-└── requirements.txt     # Root-level Python deps (same as backend)
++-- backend/             # FastAPI server
+�   +-- app/
+�   �   +-- main.py          # Entry point, CORS
+�   �   +-- api/endpoints.py # All routes (upload, analyze, train, chat, auth)
+�   �   +-- core/            # processing.py, forecasting.py, config.py
+�   +-- requirements.txt
+�   +-- .env.example
+�   +-- Dockerfile
++-- frontend/            # Next.js app
+�   +-- src/
+�   �   +-- app/             # Pages: /, /build, /explore, /about, /login
+�   �   +-- components/      # Header, ChatSidebar, build steps, UI kit
+�   �   +-- lib/             # store.ts, api.ts, utils.ts
+�   +-- package.json
++-- supabase_schema.sql  # Optional DB schema
++-- requirements.txt     # Root-level Python deps (same as backend)
 ```
 
 ---
@@ -62,11 +62,11 @@ source venv/bin/activate
 
 # Install Python dependencies
 pip install -r requirements.txt
-# (or from backend/ — same file)
+# (or from backend/ � same file)
 
 # Create your env file
 cp backend/.env.example backend/.env
-# Edit backend/.env and fill in your keys (Supabase, OpenAI) — optional for demo mode
+# Edit backend/.env and fill in your keys (Supabase, OpenAI) � optional for demo mode
 
 # Start the API server
 cd backend
@@ -109,7 +109,7 @@ OPENAI_API_KEY=your-openai-key        # optional for demo
 NEXT_PUBLIC_API_URL=http://localhost:8000/api
 ```
 
-This file is **not** committed — create it locally. The default value above works for local dev.
+This file is **not** committed � create it locally. The default value above works for local dev.
 
 ---
 
@@ -128,25 +128,25 @@ This file is **not** committed — create it locally. The default value above wo
 
 | Route | Description |
 |-------|-------------|
-| `/` | Landing page — hero, capabilities, how-it-works |
+| `/` | Landing page � hero, capabilities, how-it-works |
 | `/create` | 5-step wizard: Get Started -> Process Data -> Train -> Analysis & Results -> Publish Story |
 | `/explore` | Browse published community projects |
 | `/about` | Mission, tech stack, credits |
 | `/login` | Simple username/password auth |
 
 - **Dark theme** throughout
-- **BubbleSelect** UI — pick options with friendly pill buttons instead of dropdowns
-- **Debug mode** — toggle the bug icon on `/build` to see state + skip between steps
-- **Chat sidebar** — persistent AI assistant on the build page
+- **BubbleSelect** UI � pick options with friendly pill buttons instead of dropdowns
+- **Debug mode** � toggle the bug icon on `/build` to see state + skip between steps
+- **Chat sidebar** � persistent AI assistant on the build page
 
 ---
 
 ## Auth (demo mode)
 
-Auth is intentionally simple for the hackathon — passwords are SHA-256 hashed and stored in-memory. Data resets when the backend restarts. The endpoints are:
+Auth is intentionally simple for the hackathon � passwords are SHA-256 hashed and stored in-memory. Data resets when the backend restarts. The endpoints are:
 
-- `POST /api/auth/register` — `{ username, password }`
-- `POST /api/auth/login` — `{ username, password }`
+- `POST /api/auth/register` � `{ username, password }`
+- `POST /api/auth/login` � `{ username, password }`
 
 ---
 
@@ -157,3 +157,4 @@ Auth is intentionally simple for the hackathon — passwords are SHA-256 hashed 
 3. Run `npm run build` in `frontend/` to check for errors
 4. Open a PR
 - Generate showcase exports in `6_Showcase.py`
+
