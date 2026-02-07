@@ -102,7 +102,8 @@ export async function trainModel(
   dateCol: string,
   targetCol: string,
   drivers: string[],
-  horizon: number
+  horizon: number,
+  driverOutlierStrategy: string
 ) {
   const res = await api.post("/train", {
     project_id: projectId,
@@ -110,6 +111,7 @@ export async function trainModel(
     target_col: targetCol,
     drivers,
     horizon,
+    driver_outlier_strategy: driverOutlierStrategy,
   });
   return res.data;
 }

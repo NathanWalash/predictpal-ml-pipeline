@@ -117,8 +117,12 @@ interface BuildState {
   setFrequency: (f: string) => void;
   missingStrategy: string;
   setMissingStrategy: (s: string) => void;
+  missingFillValue: string;
+  setMissingFillValue: (v: string) => void;
   outlierStrategy: string;
   setOutlierStrategy: (s: string) => void;
+  driverOutlierStrategy: string;
+  setDriverOutlierStrategy: (s: string) => void;
   selectedLags: string[];
   toggleLag: (lag: string) => void;
   calendarFeatures: boolean;
@@ -189,7 +193,9 @@ const buildInitial = {
   targetCol: null as string | null,
   frequency: "",
   missingStrategy: "",
+  missingFillValue: "",
   outlierStrategy: "",
+  driverOutlierStrategy: "keep",
   selectedLags: [] as string[],
   calendarFeatures: false,
   horizon: 12,
@@ -284,7 +290,9 @@ export const useBuildStore = create<BuildState>()((set) => ({
   setTargetCol: (col) => set({ targetCol: col }),
   setFrequency: (f) => set({ frequency: f }),
   setMissingStrategy: (s) => set({ missingStrategy: s }),
+  setMissingFillValue: (v) => set({ missingFillValue: v }),
   setOutlierStrategy: (s) => set({ outlierStrategy: s }),
+  setDriverOutlierStrategy: (s) => set({ driverOutlierStrategy: s }),
   toggleLag: (lag) =>
     set((s) => ({
       selectedLags: s.selectedLags.includes(lag)

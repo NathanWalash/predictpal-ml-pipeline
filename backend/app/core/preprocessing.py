@@ -433,6 +433,8 @@ def clean_dataframe_for_training(
     driver_cols: Optional[list[str]] = None,
     *,
     outlier_action: str = "cap",
+    driver_outlier_action: Optional[str] = None,
+    average_daily_drivers_to_weekly: bool = True,
     min_rows: int = 20,
 ) -> tuple[pd.DataFrame, dict]:
     """
@@ -494,6 +496,22 @@ def clean_dataframe_for_training(
         drop=True
     )
 
+    driver_weekly_averaging_applied = False
+    median_gap = result[date_col_clean].diff().dropna().median()
+    if (
+        average_daily_drivers_to_weekly
+        and numeric_driver_cols
+        and pd.notna(median_gap)
+        and median_gap <= pd.Timedelta(days=2)
+    ):
+        # Collapse daily volatility in drivers into weekly means while preserving row count.
+        week_key = result[date_col_clean].dt.to_period("W-SUN")
+        for col in numeric_driver_cols:
+            result[col] = result.groupby(week_key)[col].transform("mean")
+        driver_weekly_averaging_applied = True
+
+    resolved_driver_outlier_action = driver_outlier_action or outlier_action
+
     # Fill target with interpolation first, then edge-fill. Any unresolved NaN is dropped.
     result = handle_missing(result, target_col_clean, "interpolate")
     result = handle_missing(result, target_col_clean, "ffill")
@@ -502,8 +520,13 @@ def clean_dataframe_for_training(
 
     for col in numeric_driver_cols:
         result = handle_missing(result, col, "median")
-        if outlier_action != "keep":
-            result = handle_outliers(result, col, action=outlier_action, method="iqr")
+        if resolved_driver_outlier_action != "keep":
+            result = handle_outliers(
+                result,
+                col,
+                action=resolved_driver_outlier_action,
+                method="iqr",
+            )
 
     for col in categorical_driver_cols:
         result[col] = result[col].fillna("unknown")
@@ -522,6 +545,8 @@ def clean_dataframe_for_training(
         "date_col": date_col_clean,
         "target_col": target_col_clean,
         "driver_cols": driver_cols_clean,
+        "driver_outlier_action": resolved_driver_outlier_action,
+        "driver_weekly_averaging_applied": driver_weekly_averaging_applied,
         "rows_removed": rows_removed,
         "cols_removed": cols_removed,
         "invalid_dates_removed": invalid_dates,

@@ -70,6 +70,7 @@ class TrainRequest(BaseModel):
     target_col: str
     drivers: list[str] = []
     horizon: int = 12
+    driver_outlier_strategy: str = "keep"
 
 
 class ChatRequest(BaseModel):
@@ -242,13 +243,24 @@ async def train_model(req: TrainRequest):
     if req.project_id not in _dataframes:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    normalized_driver_outlier = {
+        "clip": "cap",
+        "none": "keep",
+    }.get(req.driver_outlier_strategy, req.driver_outlier_strategy)
+    if normalized_driver_outlier not in {"keep", "remove", "cap"}:
+        raise HTTPException(
+            status_code=400,
+            detail="driver_outlier_strategy must be one of: keep, remove, cap",
+        )
+
     raw_df = _dataframes[req.project_id].copy()
     try:
         df, prep_report = clean_dataframe_for_training(
             raw_df,
             date_col=req.date_col,
             target_col=req.target_col,
-            driver_cols=None,
+            driver_cols=req.drivers if req.drivers else None,
+            driver_outlier_action=normalized_driver_outlier,
             min_rows=20,
         )
     except ValueError as e:

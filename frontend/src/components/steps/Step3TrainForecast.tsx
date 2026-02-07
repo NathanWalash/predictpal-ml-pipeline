@@ -47,6 +47,7 @@ export default function Step3TrainForecast() {
     numericColumns,
     selectedDrivers,
     toggleDriver,
+    driverOutlierStrategy,
     horizon,
     setHorizon,
     trainTestSplit,
@@ -87,7 +88,8 @@ export default function Step3TrainForecast() {
         (dateCol || detectedDateCol)!,
         targetCol!,
         selectedDrivers,
-        horizon
+        horizon,
+        driverOutlierStrategy
       );
       setForecastResults(result);
       setStatus("success");

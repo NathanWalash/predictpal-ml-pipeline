@@ -1,7 +1,7 @@
 "use client";
 
 import { useBuildStore } from "@/lib/store";
-import { BubbleSelect, Toggle, Button } from "@/components/ui";
+import { BubbleSelect, Toggle, Button, Input } from "@/components/ui";
 
 const FREQUENCY_OPTIONS = [
   { id: "D", label: "Daily", icon: "📅" },
@@ -13,15 +13,18 @@ const FREQUENCY_OPTIONS = [
 
 const MISSING_STRATEGY_OPTIONS = [
   { id: "ffill", label: "Forward Fill", icon: "➡️", description: "Carry last known value" },
+  { id: "bfill", label: "Backward Fill", icon: "⬅️", description: "Use next known value" },
   { id: "interpolate", label: "Interpolate", icon: "📐", description: "Linear interpolation" },
   { id: "drop", label: "Drop Rows", icon: "🗑️", description: "Remove missing rows" },
   { id: "mean", label: "Mean Fill", icon: "📊", description: "Fill with column mean" },
+  { id: "median", label: "Median Fill", icon: "📉", description: "Fill with column median" },
+  { id: "value", label: "Custom Value", icon: "🔢", description: "Fill with a fixed value" },
 ];
 
 const OUTLIER_STRATEGY_OPTIONS = [
-  { id: "clip", label: "Clip (IQR)", icon: "✂️", description: "Cap at 1.5× IQR bounds" },
+  { id: "cap", label: "Clip (IQR)", icon: "✂️", description: "Cap at 1.5× IQR bounds" },
   { id: "remove", label: "Remove", icon: "🗑️", description: "Drop outlier rows" },
-  { id: "none", label: "Keep All", icon: "✅", description: "Don't treat outliers" },
+  { id: "keep", label: "Keep All", icon: "✅", description: "Don't treat outliers" },
 ];
 
 const LAG_OPTIONS = [
@@ -46,8 +49,12 @@ export default function Step2ProcessData() {
     setFrequency,
     missingStrategy,
     setMissingStrategy,
+    missingFillValue,
+    setMissingFillValue,
     outlierStrategy,
     setOutlierStrategy,
+    driverOutlierStrategy,
+    setDriverOutlierStrategy,
     selectedLags,
     toggleLag,
     calendarFeatures,
@@ -72,6 +79,20 @@ export default function Step2ProcessData() {
 
   const canContinue =
     (dateCol || detectedDateCol) && targetCol && frequency && missingStrategy;
+
+  const normalizedOutlierStrategy =
+    outlierStrategy === "clip"
+      ? "cap"
+      : outlierStrategy === "none"
+        ? "keep"
+        : outlierStrategy;
+
+  const normalizedDriverOutlierStrategy =
+    driverOutlierStrategy === "clip"
+      ? "cap"
+      : driverOutlierStrategy === "none"
+        ? "keep"
+        : driverOutlierStrategy;
 
   const handleContinue = () => {
     if (!dateCol && detectedDateCol) setDateCol(detectedDateCol);
@@ -121,9 +142,26 @@ export default function Step2ProcessData() {
         <BubbleSelect
           label="Outlier Strategy"
           options={OUTLIER_STRATEGY_OPTIONS}
-          selected={outlierStrategy || "none"}
+          selected={normalizedOutlierStrategy || "keep"}
           onSelect={setOutlierStrategy}
         />
+
+        <BubbleSelect
+          label="Driver Outlier Strategy"
+          options={OUTLIER_STRATEGY_OPTIONS}
+          selected={normalizedDriverOutlierStrategy || "keep"}
+          onSelect={setDriverOutlierStrategy}
+        />
+
+        {missingStrategy === "value" && (
+          <Input
+            type="number"
+            label="Custom Fill Value"
+            placeholder="e.g. 0"
+            value={missingFillValue}
+            onChange={(e) => setMissingFillValue(e.target.value)}
+          />
+        )}
       </div>
 
       {/* Feature Engineering */}
