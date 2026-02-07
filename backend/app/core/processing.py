@@ -8,6 +8,40 @@ import numpy as np
 from typing import Optional
 
 
+def parse_datetime_series(values: pd.Series) -> pd.Series:
+    """
+    Robust datetime parsing for messy uploads.
+    Handles wrapper chars and slash-based formats with day/month ambiguity.
+    """
+    raw = values.astype("string").str.strip()
+    cleaned = (
+        raw
+        .str.replace(r"^[\[\(\{<\"']+|[\]\)\}>\"']+$", "", regex=True)
+        .str.extract(r"(\d{1,4}[/-]\d{1,2}[/-]\d{1,4}|\d{4}-\d{2}-\d{2})", expand=False)
+        .fillna(raw)
+        .str.strip()
+    )
+
+    cleaned_non_null = cleaned.dropna()
+    # For slash-separated dates, choose one consistent interpretation
+    # for the full column (avoid row-wise mixed mm/dd and dd/mm parsing).
+    has_slash_dates = bool(cleaned_non_null.str.contains(r"/", regex=True).any())
+
+    parsed_default = pd.to_datetime(cleaned, errors="coerce")
+    parsed_dayfirst = pd.to_datetime(cleaned, errors="coerce", dayfirst=True)
+
+    if has_slash_dates:
+        default_ok = int(parsed_default.notna().sum())
+        dayfirst_ok = int(parsed_dayfirst.notna().sum())
+        # Prefer day-first on tie; UK-source datasets are commonly dd/mm/yyyy.
+        if dayfirst_ok >= default_ok:
+            return parsed_dayfirst
+        return parsed_default
+
+    parsed_yearfirst = pd.to_datetime(cleaned, errors="coerce", yearfirst=True)
+    return parsed_default.fillna(parsed_dayfirst).fillna(parsed_yearfirst)
+
+
 def detect_date_column(df: pd.DataFrame) -> Optional[str]:
     """
     Heuristic to find the column most likely containing dates.
@@ -17,15 +51,16 @@ def detect_date_column(df: pd.DataFrame) -> Optional[str]:
     for col in df.columns:
         if any(kw in col.lower() for kw in ["date", "time", "period", "week"]):
             try:
-                pd.to_datetime(df[col], infer_datetime_format=True)
-                return col
+                parsed = parse_datetime_series(df[col])
+                if parsed.notna().sum() > len(df) * 0.7:
+                    return col
             except (ValueError, TypeError):
                 continue
 
     # Fallback: try parsing every object/string column
     for col in df.select_dtypes(include=["object", "datetime64"]).columns:
         try:
-            parsed = pd.to_datetime(df[col], infer_datetime_format=True)
+            parsed = parse_datetime_series(df[col])
             if parsed.notna().sum() > len(df) * 0.8:
                 return col
         except (ValueError, TypeError):
@@ -35,8 +70,49 @@ def detect_date_column(df: pd.DataFrame) -> Optional[str]:
 
 
 def detect_numeric_columns(df: pd.DataFrame) -> list[str]:
-    """Return all numeric columns that could be target metrics."""
-    return df.select_dtypes(include=[np.number]).columns.tolist()
+    """
+    Return columns that are numeric or strongly numeric-like.
+
+    Many uploads store numbers as strings (commas, currency, percents),
+    which pandas reads as object dtype. We include those when most values
+    can be coerced to numeric.
+    """
+    numeric_cols: list[str] = []
+
+    for col in df.columns:
+        series = df[col]
+
+        if pd.api.types.is_numeric_dtype(series):
+            numeric_cols.append(col)
+            continue
+
+        non_null = series.notna().sum()
+        if non_null == 0:
+            continue
+
+        cleaned = (
+            series.astype("string")
+            .str.strip()
+            .str.replace(r"^\((.*)\)$", r"-\1", regex=True)  # "(123)" -> "-123"
+            .str.replace(r"[£$€,_%\s]", "", regex=True)
+            .replace(
+                {
+                    "": np.nan,
+                    "-": np.nan,
+                    "nan": np.nan,
+                    "None": np.nan,
+                    "null": np.nan,
+                    "N/A": np.nan,
+                }
+            )
+        )
+        coerced = pd.to_numeric(cleaned, errors="coerce")
+        parse_ratio = float(coerced.notna().sum()) / float(non_null)
+
+        if parse_ratio >= 0.8:
+            numeric_cols.append(col)
+
+    return numeric_cols
 
 
 def validate_frequency(df: pd.DataFrame, date_col: str) -> dict:
@@ -44,7 +120,15 @@ def validate_frequency(df: pd.DataFrame, date_col: str) -> dict:
     Check the time-series frequency. Returns info about gaps.
     Does NOT auto-impute — user decides.
     """
-    dates = pd.to_datetime(df[date_col]).sort_values().reset_index(drop=True)
+    dates = parse_datetime_series(df[date_col]).dropna().sort_values().reset_index(drop=True)
+    if len(dates) < 2:
+        return {
+            "detected_frequency": "irregular",
+            "median_gap_days": None,
+            "total_rows": len(df),
+            "missing_ranges": [],
+            "has_gaps": False,
+        }
     diffs = dates.diff().dropna()
 
     # Detect dominant frequency

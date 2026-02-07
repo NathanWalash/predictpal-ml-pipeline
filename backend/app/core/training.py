@@ -278,9 +278,9 @@ def train_and_forecast(
         }
     )
 
-    inputs_dir = run_dir / "inputs"
-    inputs_dir.mkdir(parents=True, exist_ok=True)
     if input_paths:
+        inputs_dir = run_dir / "inputs"
+        inputs_dir.mkdir(parents=True, exist_ok=True)
         for path in input_paths:
             if path.exists():
                 shutil.copy2(path, inputs_dir / path.name)

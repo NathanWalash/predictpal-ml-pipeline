@@ -9,6 +9,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+from app.core.processing import parse_datetime_series
 
 
 # ============== CLEANING ==============
@@ -433,6 +434,8 @@ def clean_dataframe_for_training(
     driver_cols: Optional[list[str]] = None,
     *,
     outlier_action: str = "cap",
+    driver_outlier_action: Optional[str] = None,
+    average_daily_drivers_to_weekly: bool = True,
     min_rows: int = 20,
 ) -> tuple[pd.DataFrame, dict]:
     """
@@ -470,15 +473,30 @@ def clean_dataframe_for_training(
 
     target_nan_before = int(result[target_col_clean].isna().sum())
 
-    result[date_col_clean] = pd.to_datetime(result[date_col_clean], errors="coerce")
+    result[date_col_clean] = parse_datetime_series(result[date_col_clean])
     invalid_dates = int(result[date_col_clean].isna().sum())
     result = result.dropna(subset=[date_col_clean])
+    if result.empty:
+        raise ValueError(
+            f"No rows left after parsing '{date_col}' as dates. "
+            "Check that you selected the correct date column."
+        )
+
+    # Re-drop empty columns after date filtering; many wide health datasets
+    # keep values only on rows that may be removed as invalid dates.
+    result = result.dropna(axis=1, how="all")
+    if target_col_clean not in result.columns:
+        raise ValueError(
+            f"Target column '{target_col}' has no usable values after date cleanup. "
+            "Pick a different target column."
+        )
 
     result[target_col_clean] = _coerce_numeric(result[target_col_clean])
 
     numeric_driver_cols: list[str] = []
     categorical_driver_cols: list[str] = []
 
+    driver_cols_clean = [col for col in driver_cols_clean if col in result.columns]
     for col in driver_cols_clean:
         candidate_numeric = _coerce_numeric(result[col])
         numeric_ratio = float(candidate_numeric.notna().mean()) if len(result) else 0.0
@@ -494,6 +512,22 @@ def clean_dataframe_for_training(
         drop=True
     )
 
+    driver_weekly_averaging_applied = False
+    median_gap = result[date_col_clean].diff().dropna().median()
+    if (
+        average_daily_drivers_to_weekly
+        and numeric_driver_cols
+        and pd.notna(median_gap)
+        and median_gap <= pd.Timedelta(days=2)
+    ):
+        # Collapse daily volatility in drivers into weekly means while preserving row count.
+        week_key = result[date_col_clean].dt.to_period("W-SUN")
+        for col in numeric_driver_cols:
+            result[col] = result.groupby(week_key)[col].transform("mean")
+        driver_weekly_averaging_applied = True
+
+    resolved_driver_outlier_action = driver_outlier_action or outlier_action
+
     # Fill target with interpolation first, then edge-fill. Any unresolved NaN is dropped.
     result = handle_missing(result, target_col_clean, "interpolate")
     result = handle_missing(result, target_col_clean, "ffill")
@@ -502,14 +536,27 @@ def clean_dataframe_for_training(
 
     for col in numeric_driver_cols:
         result = handle_missing(result, col, "median")
-        if outlier_action != "keep":
-            result = handle_outliers(result, col, action=outlier_action, method="iqr")
+        if resolved_driver_outlier_action != "keep":
+            result = handle_outliers(
+                result,
+                col,
+                action=resolved_driver_outlier_action,
+                method="iqr",
+            )
 
     for col in categorical_driver_cols:
         result[col] = result[col].fillna("unknown")
 
     if outlier_action != "keep":
         result = handle_outliers(result, target_col_clean, action=outlier_action, method="iqr")
+
+    # Final safety pass after coercion/filling/outlier handling.
+    result = result.dropna(axis=1, how="all")
+    if target_col_clean not in result.columns:
+        raise ValueError(
+            f"Target column '{target_col}' became empty after preprocessing. "
+            "Pick a different target column."
+        )
 
     target_nan_after = int(result[target_col_clean].isna().sum())
     rows_removed = initial_rows - len(result)
@@ -522,6 +569,8 @@ def clean_dataframe_for_training(
         "date_col": date_col_clean,
         "target_col": target_col_clean,
         "driver_cols": driver_cols_clean,
+        "driver_outlier_action": resolved_driver_outlier_action,
+        "driver_weekly_averaging_applied": driver_weekly_averaging_applied,
         "rows_removed": rows_removed,
         "cols_removed": cols_removed,
         "invalid_dates_removed": invalid_dates,

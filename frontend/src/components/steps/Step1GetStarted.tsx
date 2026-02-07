@@ -95,7 +95,11 @@ export default function Step1GetStarted() {
           setProjectId(proj.project_id);
         }
 
-        const result = await uploadFile(file);
+        const result = await uploadFile(file, storedProjectId || undefined);
+        if (result.project_id) {
+          // Keep store project id aligned with backend upload state.
+          setProjectId(result.project_id);
+        }
         addUploadedFile(file.name);
         setFileInfo({
           columns: result.columns || [],
@@ -118,6 +122,7 @@ export default function Step1GetStarted() {
     },
     [
       user,
+      storedProjectId,
       projectTitle,
       projectDescription,
       setProjectId,

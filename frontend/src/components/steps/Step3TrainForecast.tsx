@@ -101,7 +101,8 @@ export default function Step3TrainForecast() {
     dateCol,
     detectedDateCol,
     targetCol,
-    numericColumns,
+    driverFileName,
+    driverNumericColumns,
     selectedDrivers,
     toggleDriver,
     calendarFeatures,
@@ -133,11 +134,18 @@ export default function Step3TrainForecast() {
 
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
-
-  // derive driver options from numeric columns minus target
-  const driverOptions = numericColumns
-    .filter((c) => c !== targetCol)
-    .map((c) => ({ id: c, label: c, icon: "📊" }));
+  const getApiErrorMessage = (err: unknown) => {
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      "response" in err &&
+      typeof (err as { response?: unknown }).response === "object" &&
+      (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+    ) {
+      return (err as { response: { data: { detail: string } } }).response.data.detail;
+    }
+    return "Training failed.";
+  };
 
   const canRun =
     (dateCol || detectedDateCol) &&
@@ -172,8 +180,8 @@ export default function Step3TrainForecast() {
       );
       setForecastResults(result);
       setStatus("success");
-    } catch (err: any) {
-      setErrorMsg(err?.response?.data?.detail || "Training failed.");
+    } catch (err: unknown) {
+      setErrorMsg(getApiErrorMessage(err));
       setStatus("error");
     } finally {
       setLoading(false);
@@ -238,17 +246,32 @@ export default function Step3TrainForecast() {
       {/* Drivers */}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 space-y-6">
         <h3 className="text-lg font-semibold text-white">Drivers</h3>
-        {driverOptions.length > 0 ? (
-          <BubbleSelect
-            label="Pre-attached cleaned drivers"
-            options={driverOptions}
-            selected={selectedDrivers}
-            onSelect={toggleDriver}
-            multi
-          />
+        {driverFileName ? (
+          <>
+            <p className="text-sm text-slate-400">
+              Driver source: <span className="text-slate-300">{driverFileName}</span>
+            </p>
+            {driverNumericColumns.length > 0 ? (
+              <BubbleSelect
+                label="Select driver columns"
+                options={driverNumericColumns.map((c) => ({
+                  id: c,
+                  label: c,
+                  icon: "📊",
+                }))}
+                selected={selectedDrivers}
+                onSelect={toggleDriver}
+                multi
+              />
+            ) : (
+              <p className="text-sm text-slate-400">
+                No numeric drivers available after processing.
+              </p>
+            )}
+          </>
         ) : (
           <p className="text-sm text-slate-400">
-            No drivers detected yet. Upload drivers or proceed without them.
+            No driver file uploaded. Training will run on target data only.
           </p>
         )}
         <Toggle

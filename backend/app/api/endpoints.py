@@ -11,13 +11,15 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 import pandas as pd
 from pydantic import BaseModel
+import pandas as pd
 
 from app.core.processing import (
     detect_date_column,
     detect_numeric_columns,
+    parse_datetime_series,
     validate_frequency,
     get_data_health,
     load_dataframe,
@@ -25,16 +27,20 @@ from app.core.processing import (
 )
 from app.core.training import train_and_forecast
 from app.core.preprocessing import clean_dataframe_for_training
+from app.core.paths import OUTPUTS_DIR
 
 router = APIRouter()
 
 # In-memory stores for demo
 _projects: dict = {}
 _dataframes: dict = {}
+_processed_dataframes: dict = {}  # project_id -> cleaned DataFrame from Step 2
+_processed_driver_dataframes: dict = {}  # project_id -> cleaned/resampled driver DataFrame
 _driver_dataframes: dict = {}  # project_id -> driver DataFrame
+_driver_file_names: dict = {}  # project_id -> uploaded driver filename
 _users: dict = {}  # username -> {password_hash, user_id}
 _user_projects: dict = {}  # user_id -> [project_ids]
-_analysis_dir = Path(__file__).resolve().parent.parent / "outputs_temp"
+_analysis_dir = OUTPUTS_DIR
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -110,10 +116,21 @@ def _story_card(project: dict[str, Any]) -> dict[str, Any]:
 
 def _resolve_analysis_path(path_value: str, fallback: str) -> Path:
     raw = path_value or fallback
-    candidate = (_analysis_dir / raw).resolve()
+    raw_path = Path(raw)
+    candidate = raw_path.resolve() if raw_path.is_absolute() else (_analysis_dir / raw_path).resolve()
     if not str(candidate).startswith(str(_analysis_dir.resolve())):
         raise HTTPException(status_code=400, detail="Invalid analysis file path")
     return candidate
+
+
+def _resolve_analysis_path_multi(path_value: str, fallbacks: list[str]) -> Path:
+    if path_value:
+        return _resolve_analysis_path(path_value, fallbacks[0])
+    for fallback in fallbacks:
+        candidate = _resolve_analysis_path("", fallback)
+        if candidate.exists():
+            return candidate
+    return _resolve_analysis_path("", fallbacks[0])
 
 
 def _csv_records(path: Path) -> list[dict[str, Any]]:
@@ -124,6 +141,38 @@ def _csv_records(path: Path) -> list[dict[str, Any]]:
         if pd.api.types.is_datetime64_any_dtype(df[col]):
             df[col] = df[col].dt.strftime("%Y-%m-%d")
     return df.where(pd.notna(df), None).to_dict(orient="records")
+
+
+def _resolve_df_column(df: pd.DataFrame, requested: str, label: str) -> str:
+    if requested in df.columns:
+        return requested
+
+    direct_lower = {str(col).lower(): str(col) for col in df.columns}
+    requested_lower = str(requested).lower()
+    if requested_lower in direct_lower:
+        return direct_lower[requested_lower]
+
+    normalized = "".join(ch if ch.isalnum() else "_" for ch in requested_lower)
+    normalized = "_".join(part for part in normalized.split("_") if part)
+    normalized_map = {}
+    for col in df.columns:
+        key = "".join(ch if ch.isalnum() else "_" for ch in str(col).lower())
+        key = "_".join(part for part in key.split("_") if part)
+        normalized_map[key] = str(col)
+    if normalized in normalized_map:
+        return normalized_map[normalized]
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Training {label} column '{requested}' not found in processed data columns {df.columns.tolist()}",
+    )
+
+
+def _resolve_optional_df_column(df: pd.DataFrame, requested: str) -> str | None:
+    try:
+        return _resolve_df_column(df, requested, "driver")
+    except HTTPException:
+        return None
 
 
 # ─── Auth Models ───────────────────────────────────────────────────────────────
@@ -158,6 +207,7 @@ class TrainRequest(BaseModel):
     target_col: str
     drivers: list[str] = []
     horizon: int = 8
+    driver_outlier_strategy: str = "keep"
     baseline_model: str = "lagged_ridge"
     multivariate_model: str = "gbm"
     lag_config: str = "1,2,4"
@@ -166,6 +216,16 @@ class TrainRequest(BaseModel):
     validation_mode: str = "walk_forward"
     calendar_features: bool = False
     holiday_features: bool = False
+
+
+class ProcessRequest(BaseModel):
+    project_id: str
+    date_col: str
+    target_col: str
+    frequency: str = "W"
+    driver_date_col: str | None = None
+    outlier_strategy: str = "cap"
+    driver_outlier_strategy: str = "keep"
 
 
 class ChatRequest(BaseModel):
@@ -213,10 +273,13 @@ def _validate_dataframe(df: pd.DataFrame, label: str = "file") -> None:
 
 
 @router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    file: UploadFile = File(...),
+    project_id: str | None = Form(None),
+):
     """Receive a CSV/Excel/TXT file and create a project."""
     _validate_upload(file.filename)
-    project_id = str(uuid.uuid4())
+    pid = project_id or str(uuid.uuid4())
 
     # Save file temporarily
     suffix = os.path.splitext(file.filename or ".csv")[1]
@@ -238,18 +301,18 @@ async def upload_file(file: UploadFile = File(...)):
     numeric_cols = detect_numeric_columns(df)
 
     # Store in memory
-    _projects[project_id] = {
+    _projects[pid] = {
         "file_path": tmp.name,
         "file_name": file.filename,
         "status": "uploaded",
         "current_step": 1,
     }
-    _dataframes[project_id] = df
+    _dataframes[pid] = df
 
     preview = get_preview(df, n=10)
 
     return {
-        "project_id": project_id,
+        "project_id": pid,
         "file_name": file.filename,
         "rows": len(df),
         "columns": df.columns.tolist(),
@@ -266,7 +329,7 @@ async def upload_file(file: UploadFile = File(...)):
 @router.post("/upload-drivers")
 async def upload_driver_file(
     file: UploadFile = File(...),
-    project_id: str | None = None,
+    project_id: str | None = Form(None),
 ):
     """Receive an optional CSV/Excel/TXT file containing driver / exogenous data."""
     _validate_upload(file.filename)
@@ -290,6 +353,9 @@ async def upload_driver_file(
     numeric_cols = detect_numeric_columns(df)
 
     _driver_dataframes[pid] = df
+    _driver_file_names[pid] = file.filename or "driver_file"
+    if pid in _projects:
+        _projects[pid]["driver_file_name"] = file.filename
 
     preview = get_preview(df, n=10)
 
@@ -332,6 +398,195 @@ async def analyze_data(req: AnalyzeRequest):
 # ─── Train ─────────────────────────────────────────────────────────────────────
 
 
+def _coerce_numeric_series(values: pd.Series) -> pd.Series:
+    cleaned = (
+        values.astype("string")
+        .str.replace(r"[£$€,_%\s]", "", regex=True)
+        .replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "null": pd.NA, "N/A": pd.NA})
+    )
+    return pd.to_numeric(cleaned, errors="coerce")
+
+
+def _normalize_frequency(freq: str | None) -> str:
+    if not freq:
+        return "W-SUN"
+    mapping = {
+        "D": "D",
+        "W": "W-SUN",
+        "MS": "MS",
+        "QS": "QS",
+        "YS": "YS",
+    }
+    return mapping.get(freq.upper(), "W-SUN")
+
+
+def _normalized_name(value: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in value.lower())
+    return "_".join(part for part in cleaned.split("_") if part)
+
+
+@router.post("/process")
+async def process_data(req: ProcessRequest):
+    """Apply Step 2 preprocessing and cache the cleaned dataframe for training."""
+    if req.project_id not in _dataframes:
+        raise HTTPException(status_code=404, detail="Project not found")
+    _processed_driver_dataframes.pop(req.project_id, None)
+
+    normalized_outlier = {
+        "clip": "cap",
+        "none": "keep",
+    }.get(req.outlier_strategy, req.outlier_strategy)
+    if normalized_outlier not in {"keep", "remove", "cap"}:
+        raise HTTPException(
+            status_code=400,
+            detail="outlier_strategy must be one of: keep, remove, cap",
+        )
+
+    normalized_driver_outlier = {
+        "clip": "cap",
+        "none": "keep",
+    }.get(req.driver_outlier_strategy, req.driver_outlier_strategy)
+    if normalized_driver_outlier not in {"keep", "remove", "cap"}:
+        raise HTTPException(
+            status_code=400,
+            detail="driver_outlier_strategy must be one of: keep, remove, cap",
+        )
+
+    raw_df = _dataframes[req.project_id].copy()
+
+    candidate_driver_cols = [
+        col
+        for col in raw_df.columns
+        if col not in {req.date_col, req.target_col}
+    ]
+
+    requested_date_col = req.date_col
+    process_note: str | None = None
+    resample_freq = _normalize_frequency(req.frequency)
+    try:
+        cleaned_df, prep_report = clean_dataframe_for_training(
+            raw_df,
+            date_col=requested_date_col,
+            target_col=req.target_col,
+            driver_cols=candidate_driver_cols,
+            outlier_action=normalized_outlier,
+            driver_outlier_action=normalized_driver_outlier,
+            min_rows=20,
+        )
+    except ValueError as e:
+        fallback_date_col = detect_date_column(raw_df)
+        if (
+            "No rows left after parsing" in str(e)
+            and fallback_date_col
+            and fallback_date_col != requested_date_col
+        ):
+            process_note = (
+                f"Selected date column '{requested_date_col}' was not parseable. "
+                f"Used '{fallback_date_col}' instead."
+            )
+            try:
+                cleaned_df, prep_report = clean_dataframe_for_training(
+                    raw_df,
+                    date_col=fallback_date_col,
+                    target_col=req.target_col,
+                    driver_cols=candidate_driver_cols,
+                    outlier_action=normalized_outlier,
+                    driver_outlier_action=normalized_driver_outlier,
+                    min_rows=20,
+                )
+            except ValueError as inner_e:
+                raise HTTPException(status_code=400, detail=f"Preprocessing error: {inner_e}")
+        else:
+            raise HTTPException(status_code=400, detail=f"Preprocessing error: {e}")
+
+    if not prep_report["ready"]["ready"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Data not ready after processing: {prep_report['ready']['errors']}",
+        )
+
+    date_col = prep_report["date_col"]
+    target_col = prep_report["target_col"]
+
+    target_only = cleaned_df[[date_col, target_col]].copy()
+    target_only = target_only.set_index(date_col).sort_index()
+    target_only[target_col] = pd.to_numeric(target_only[target_col], errors="coerce")
+    target_only = target_only.resample(resample_freq).mean(numeric_only=True)
+    target_only = target_only.dropna(subset=[target_col]).reset_index()
+
+    if target_only.empty:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Preprocessing error: no target rows remain after resampling to '{resample_freq}'.",
+        )
+
+    _processed_dataframes[req.project_id] = target_only
+
+    driver_file_name = _driver_file_names.get(req.project_id)
+    driver_numeric_cols: list[str] = []
+    if req.project_id in _driver_dataframes:
+        raw_driver_df = _driver_dataframes[req.project_id].copy()
+        driver_file_name = driver_file_name or _projects.get(req.project_id, {}).get("driver_file_name")
+
+        requested_driver_date_col = req.driver_date_col or detect_date_column(raw_driver_df)
+        if requested_driver_date_col and requested_driver_date_col in raw_driver_df.columns:
+            driver_df = raw_driver_df.copy()
+            driver_df[requested_driver_date_col] = parse_datetime_series(driver_df[requested_driver_date_col])
+            driver_df = driver_df.dropna(subset=[requested_driver_date_col]).sort_values(requested_driver_date_col)
+            driver_df = driver_df.drop_duplicates(subset=[requested_driver_date_col], keep="last")
+
+            candidate_numeric = [
+                c for c in detect_numeric_columns(driver_df)
+                if c != requested_driver_date_col
+            ]
+            for col in candidate_numeric:
+                driver_df[col] = _coerce_numeric_series(driver_df[col])
+            driver_numeric_cols = [c for c in candidate_numeric if driver_df[c].notna().any()]
+
+            if driver_numeric_cols:
+                driver_clean = driver_df[[requested_driver_date_col, *driver_numeric_cols]].copy()
+                driver_clean = driver_clean.set_index(requested_driver_date_col).sort_index()
+                driver_clean = driver_clean.resample(resample_freq).mean(numeric_only=True)
+                driver_clean = driver_clean.dropna(how="all")
+                driver_clean = driver_clean.reset_index().rename(
+                    columns={requested_driver_date_col: date_col}
+                )
+
+                # If a single generic "value" column came from a temp file,
+                # expose it with a stable semantic name expected by Step 3.
+                if len(driver_numeric_cols) == 1:
+                    only_col = driver_numeric_cols[0]
+                    name_key = _normalized_name(only_col)
+                    file_key = _normalized_name(driver_file_name or "")
+                    if name_key in {"value", "val"} and any(
+                        token in file_key for token in {"temp", "meantemp", "temperature"}
+                    ):
+                        driver_clean = driver_clean.rename(columns={only_col: "temp_mean"})
+                        driver_numeric_cols = ["temp_mean"]
+
+                _processed_driver_dataframes[req.project_id] = driver_clean
+
+    numeric_cols = detect_numeric_columns(target_only)
+    preview = get_preview(target_only, n=10)
+
+    return {
+        "project_id": req.project_id,
+        "rows": len(target_only),
+        "columns": target_only.columns.tolist(),
+        "numeric_columns": numeric_cols,
+        "detected_date_col": date_col,
+        "target_col": target_col,
+        "preview": preview["rows"],
+        "dtypes": preview["dtypes"],
+        "report": prep_report,
+        "note": process_note,
+        "driver": {
+            "file_name": driver_file_name,
+            "numeric_columns": driver_numeric_cols,
+        },
+    }
+
+
 @router.get("/analysis/sample")
 async def get_analysis_sample():
     """
@@ -347,7 +602,7 @@ async def get_analysis_sample():
 
     outputs = manifest.get("outputs", {})
 
-    forecast_path = _resolve_analysis_path(outputs.get("forecast_csv", ""), "forecasts/forecast.csv")
+    forecast_path = _resolve_analysis_path_multi(outputs.get("forecast_csv", ""), ["forecast.csv", "forecasts/forecast.csv"])
     test_pred_path = _resolve_analysis_path(outputs.get("test_predictions_csv", ""), "artifacts/test_predictions.csv")
     feature_importance_path = _resolve_analysis_path(
         outputs.get("feature_importance_csv", ""),
@@ -386,56 +641,81 @@ async def get_analysis_sample():
 @router.post("/train")
 async def train_model(req: TrainRequest):
     """Run baseline + multivariate forecasting models."""
-    if req.project_id not in _dataframes:
+    if req.project_id not in _dataframes and req.project_id not in _processed_dataframes:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    raw_df = _dataframes[req.project_id].copy()
-    try:
-        df, prep_report = clean_dataframe_for_training(
-            raw_df,
-            date_col=req.date_col,
-            target_col=req.target_col,
-            driver_cols=None,
-            min_rows=20,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Preprocessing error: {e}")
-
-    if not prep_report["ready"]["ready"]:
+    normalized_driver_outlier = {
+        "clip": "cap",
+        "none": "keep",
+    }.get(req.driver_outlier_strategy, req.driver_outlier_strategy)
+    if normalized_driver_outlier not in {"keep", "remove", "cap"}:
         raise HTTPException(
             status_code=400,
-            detail=f"Data not ready for training: {prep_report['ready']['errors']}",
+            detail="driver_outlier_strategy must be one of: keep, remove, cap",
         )
 
-    date_col = prep_report["date_col"]
-    target_col = prep_report["target_col"]
+    if req.project_id in _processed_dataframes:
+        df = _processed_dataframes[req.project_id].copy()
+        date_col = _resolve_df_column(df, req.date_col, "date")
+        target_col = _resolve_df_column(df, req.target_col, "target")
+    else:
+        raw_df = _dataframes[req.project_id].copy()
+        try:
+            df, prep_report = clean_dataframe_for_training(
+                raw_df,
+                date_col=req.date_col,
+                target_col=req.target_col,
+                driver_cols=req.drivers if req.drivers else None,
+                driver_outlier_action=normalized_driver_outlier,
+                min_rows=20,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Preprocessing error: {e}")
 
-    # Prepare time series
-    df = df.sort_values(date_col).reset_index(drop=True)
-    df = df.set_index(date_col)
+        if not prep_report["ready"]["ready"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Data not ready for training: {prep_report['ready']['errors']}",
+            )
 
-    # Infer frequency
-    freq = pd.infer_freq(df.index)
-    if freq is None:
-        freq = "W"
-    df = df.asfreq(freq)
-    df[target_col] = df[target_col].interpolate(method="linear").ffill().bfill()
+        date_col = prep_report["date_col"]
+        target_col = prep_report["target_col"]
 
-    series = df[target_col].dropna().astype(float)
+    selected_drivers = req.drivers
+    if selected_drivers and req.project_id in _processed_driver_dataframes:
+        driver_df = _processed_driver_dataframes[req.project_id].copy()
+        resolved_driver_cols = []
+        for requested in selected_drivers:
+            resolved = _resolve_optional_df_column(driver_df, requested)
+            if resolved:
+                resolved_driver_cols.append(resolved)
+        # Deduplicate while preserving order.
+        available_driver_cols = list(dict.fromkeys(resolved_driver_cols))
 
-    if len(series) < 20:
-        raise HTTPException(
-            status_code=400,
-            detail="Need at least 20 data points to train a model",
-        )
+        driver_date_col = _resolve_optional_df_column(driver_df, date_col)
+        if available_driver_cols and driver_date_col:
+            df = df.merge(
+                driver_df[[driver_date_col, *available_driver_cols]],
+                left_on=date_col,
+                right_on=driver_date_col,
+                how="left",
+            )
+            if driver_date_col != date_col and driver_date_col in df.columns:
+                df = df.drop(columns=[driver_date_col])
+            selected_drivers = available_driver_cols
+        else:
+            selected_drivers = []
+
+    date_col = _resolve_df_column(df, date_col, "date")
+    target_col = _resolve_df_column(df, target_col, "target")
 
     try:
         results = train_and_forecast(
             df=df,
             project_id=req.project_id,
-            date_col=req.date_col,
-            target_col=req.target_col,
-            drivers=req.drivers,
+            date_col=date_col,
+            target_col=target_col,
+            drivers=selected_drivers,
             horizon=req.horizon,
             baseline_model=req.baseline_model,
             multivariate_model=req.multivariate_model,
@@ -445,7 +725,6 @@ async def train_model(req: TrainRequest):
             validation_mode=req.validation_mode,
             calendar_features=req.calendar_features,
             holiday_features=req.holiday_features,
-            input_paths=[Path(_projects[req.project_id]["file_path"])],
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Forecasting error: {e}")
