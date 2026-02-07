@@ -85,34 +85,66 @@ export default function BuildPage() {
 }
 
 function DebugPanel() {
-  const state = useBuildStore();
   const toggleDebug = useBuildStore((s) => s.toggleDebug);
+  const setStep = useBuildStore((s) => s.setStep);
+  const currentStep = useBuildStore((s) => s.currentStep);
+  const completedSteps = useBuildStore((s) => s.completedSteps);
+  const projectId = useBuildStore((s) => s.projectId);
+  const projectTitle = useBuildStore((s) => s.projectTitle);
+  const useCase = useBuildStore((s) => s.useCase);
+  const uploadedFiles = useBuildStore((s) => s.uploadedFiles);
+  const columns = useBuildStore((s) => s.columns);
+  const numericColumns = useBuildStore((s) => s.numericColumns);
+  const dateCol = useBuildStore((s) => s.dateCol);
+  const targetCol = useBuildStore((s) => s.targetCol);
+  const frequency = useBuildStore((s) => s.frequency);
+  const missingStrategy = useBuildStore((s) => s.missingStrategy);
+  const outlierStrategy = useBuildStore((s) => s.outlierStrategy);
+  const selectedLags = useBuildStore((s) => s.selectedLags);
+  const calendarFeatures = useBuildStore((s) => s.calendarFeatures);
+  const holidayFeatures = useBuildStore((s) => s.holidayFeatures);
+  const lagConfig = useBuildStore((s) => s.lagConfig);
+  const testWindowWeeks = useBuildStore((s) => s.testWindowWeeks);
+  const validationMode = useBuildStore((s) => s.validationMode);
+  const horizon = useBuildStore((s) => s.horizon);
+  const baselineModel = useBuildStore((s) => s.baselineModel);
+  const multivariateModel = useBuildStore((s) => s.multivariateModel);
+  const autoSelectLags = useBuildStore((s) => s.autoSelectLags);
+  const selectedDrivers = useBuildStore((s) => s.selectedDrivers);
+  const forecastResults = useBuildStore((s) => s.forecastResults);
+  const widgets = useBuildStore((s) => s.widgets);
+  const tags = useBuildStore((s) => s.tags);
+  const isLoading = useBuildStore((s) => s.isLoading);
 
   const debugData = {
-    currentStep: state.currentStep,
-    completedSteps: state.completedSteps,
-    projectId: state.projectId,
-    projectTitle: state.projectTitle,
-    useCase: state.useCase,
-    uploadedFiles: state.uploadedFiles,
-    columns: state.columns.length,
-    numericColumns: state.numericColumns.length,
-    dateCol: state.dateCol,
-    targetCol: state.targetCol,
-    frequency: state.frequency,
-    missingStrategy: state.missingStrategy,
-    outlierStrategy: state.outlierStrategy,
-    selectedLags: state.selectedLags,
-    calendarFeatures: state.calendarFeatures,
-    horizon: state.horizon,
-    trainTestSplit: state.trainTestSplit,
-    baselineModel: state.baselineModel,
-    multivariateModel: state.multivariateModel,
-    selectedDrivers: state.selectedDrivers,
-    hasForecastResults: !!state.forecastResults,
-    widgetCount: state.widgets.length,
-    tags: state.tags,
-    isLoading: state.isLoading,
+    currentStep,
+    completedSteps,
+    projectId,
+    projectTitle,
+    useCase,
+    uploadedFiles,
+    columns: columns.length,
+    numericColumns: numericColumns.length,
+    dateCol,
+    targetCol,
+    frequency,
+    missingStrategy,
+    outlierStrategy,
+    selectedLags,
+    calendarFeatures,
+    holidayFeatures,
+    lagConfig,
+    testWindowWeeks,
+    validationMode,
+    autoSelectLags,
+    horizon,
+    baselineModel,
+    multivariateModel,
+    selectedDrivers,
+    hasForecastResults: !!forecastResults,
+    widgetCount: widgets.length,
+    tags,
+    isLoading,
   };
 
   return (
@@ -135,9 +167,9 @@ function DebugPanel() {
         {[1, 2, 3, 4, 5].map((s) => (
           <button
             key={s}
-            onClick={() => state.setStep(s)}
+            onClick={() => setStep(s)}
             className={`px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
-              state.currentStep === s
+              currentStep === s
                 ? "bg-amber-500 text-black"
                 : "bg-amber-900/40 text-amber-400 hover:bg-amber-800/60 border border-amber-800/50"
             }`}

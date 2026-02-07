@@ -8,8 +8,8 @@ import uuid
 import hashlib
 import tempfile
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from pathlib import Path
 from pydantic import BaseModel
-import pandas as pd
 
 from app.core.processing import (
     detect_date_column,
@@ -19,6 +19,7 @@ from app.core.processing import (
     load_dataframe,
     get_preview,
 )
+from app.core.training import train_and_forecast
 from app.core.forecasting import run_forecast
 from app.core.preprocessing import clean_dataframe_for_training
 
@@ -69,7 +70,15 @@ class TrainRequest(BaseModel):
     date_col: str
     target_col: str
     drivers: list[str] = []
-    horizon: int = 12
+    horizon: int = 8
+    baseline_model: str = "lagged_ridge"
+    multivariate_model: str = "gbm"
+    lag_config: str = "1,2,4"
+    auto_select_lags: bool = False
+    test_window_weeks: int = 48
+    validation_mode: str = "walk_forward"
+    calendar_features: bool = False
+    holiday_features: bool = False
 
 
 class ChatRequest(BaseModel):
@@ -283,19 +292,25 @@ async def train_model(req: TrainRequest):
         )
 
     try:
-        results = run_forecast(
-            series=series,
+        results = train_and_forecast(
+            df=df,
+            project_id=req.project_id,
+            date_col=req.date_col,
+            target_col=req.target_col,
+            drivers=req.drivers,
             horizon=req.horizon,
-            drivers=req.drivers if req.drivers else None,
+            baseline_model=req.baseline_model,
+            multivariate_model=req.multivariate_model,
+            lag_config=req.lag_config,
+            auto_select_lags=req.auto_select_lags,
+            test_window_weeks=req.test_window_weeks,
+            validation_mode=req.validation_mode,
+            calendar_features=req.calendar_features,
+            holiday_features=req.holiday_features,
+            input_paths=[Path(_projects[req.project_id]["file_path"])],
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Forecasting error: {e}")
-
-    # Attach historical data for charting
-    results["historical"] = {
-        "values": series.tolist(),
-        "index": series.index.strftime("%Y-%m-%d").tolist(),
-    }
 
     return results
 
