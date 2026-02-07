@@ -22,8 +22,8 @@ const STEPS = [
   { label: "Get Started", icon: <Upload className="w-4 h-4" /> },
   { label: "Process Data", icon: <Cpu className="w-4 h-4" /> },
   { label: "Train & Forecast", icon: <BarChart3 className="w-4 h-4" /> },
-  { label: "Analysis", icon: <FileText className="w-4 h-4" /> },
-  { label: "Showcase", icon: <Trophy className="w-4 h-4" /> },
+  { label: "Analysis & Results", icon: <FileText className="w-4 h-4" /> },
+  { label: "Publish Story", icon: <Trophy className="w-4 h-4" /> },
 ];
 
 const STEP_COMPONENTS: Record<number, React.ReactNode> = {

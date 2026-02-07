@@ -189,7 +189,7 @@ function filterRowsByRange<T extends { ts: number }>(
 }
 
 export default function Step4Analysis() {
-  const { completeStep, nextStep, prevStep } = useBuildStore();
+  const { completeStep, nextStep, prevStep, setWidgets } = useBuildStore();
 
   const [analysis, setAnalysis] = useState<AnalysisBundle | null>(null);
   const [loading, setLoading] = useState(true);
@@ -476,6 +476,19 @@ export default function Step4Analysis() {
   };
 
   const handleContinue = () => {
+    const selectedWidgets = selectedSections
+      .map((id) => {
+        const section = SECTION_OPTIONS.find((s) => s.id === id);
+        if (!section) return null;
+        return {
+          type: section.id,
+          title: section.label,
+          caption: section.description,
+        };
+      })
+      .filter((item): item is { type: string; title: string; caption: string } => item !== null);
+
+    setWidgets(selectedWidgets);
     completeStep(4);
     nextStep();
   };
@@ -491,7 +504,7 @@ export default function Step4Analysis() {
   return (
     <div className="space-y-8">
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 space-y-4">
-        <h3 className="text-lg font-semibold text-white">Analysis View</h3>
+        <h3 className="text-lg font-semibold text-white">Analysis & Results</h3>
         <p className="text-sm text-slate-400">
           Pick what to show below. Start with Core sections for a simple view, then add Advanced sections if needed.
         </p>
@@ -1064,7 +1077,7 @@ export default function Step4Analysis() {
           {"<- Back"}
         </Button>
         <Button onClick={handleContinue} disabled={selectedSections.length === 0} size="lg">
-          {"Continue to Showcase ->"}
+          {"Continue to Publish Story ->"}
         </Button>
       </div>
     </div>
