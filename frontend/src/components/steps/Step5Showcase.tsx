@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useBuildStore, useAuthStore } from "@/lib/store";
 import {
   createProject,
@@ -373,30 +373,61 @@ export default function Step5Showcase() {
     setBlocks([{ id: id(), type: "graph", assetId: seed.id, title: seed.title, caption: seed.caption, windowStartTs: w.start, windowEndTs: w.end }]);
   }, [blocks.length, forecastCombined]);
 
-  const addTextBlock = (style: TextStyle = "body") => setBlocks([...blocks, { id: id(), type: "text", style, content: style === "bullets" ? "Point one\nPoint two" : style === "h1" ? headline || "Heading" : "Write your text" }]);
+  const addTextBlock = (style: TextStyle = "body") =>
+    setBlocks((prev) => [
+      ...prev,
+      {
+        id: id(),
+        type: "text",
+        style,
+        content:
+          style === "bullets"
+            ? "Point one\nPoint two"
+            : style === "h1"
+              ? headline || "Heading"
+              : "Write your text",
+      },
+    ]);
   const addGraphBlock = () => {
     const seed = GRAPH_ASSETS[0];
     const w = defaultWindow(seed.id);
-    setBlocks([...blocks, { id: id(), type: "graph", assetId: seed.id, title: seed.title, caption: seed.caption, windowStartTs: w.start, windowEndTs: w.end }]);
+    setBlocks((prev) => [
+      ...prev,
+      {
+        id: id(),
+        type: "graph",
+        assetId: seed.id,
+        title: seed.title,
+        caption: seed.caption,
+        windowStartTs: w.start,
+        windowEndTs: w.end,
+      },
+    ]);
   };
-  const updateBlock = (blockId: string, fn: (b: NotebookBlock) => NotebookBlock) => setBlocks(blocks.map((b) => (b.id === blockId ? fn(b) : b)));
-  const moveBlock = (i: number, dir: "up" | "down") => {
-    const t = dir === "up" ? i - 1 : i + 1;
-    if (t < 0 || t >= blocks.length) return;
-    const c = [...blocks];
-    [c[i], c[t]] = [c[t], c[i]];
-    setBlocks(c);
-  };
-  const reorderBlocks = (sourceId: string, targetId: string) => {
+  const updateBlock = useCallback((blockId: string, fn: (b: NotebookBlock) => NotebookBlock) => {
+    setBlocks((prev) => prev.map((b) => (b.id === blockId ? fn(b) : b)));
+  }, []);
+  const moveBlock = useCallback((i: number, dir: "up" | "down") => {
+    setBlocks((prev) => {
+      const t = dir === "up" ? i - 1 : i + 1;
+      if (t < 0 || t >= prev.length) return prev;
+      const c = [...prev];
+      [c[i], c[t]] = [c[t], c[i]];
+      return c;
+    });
+  }, []);
+  const reorderBlocks = useCallback((sourceId: string, targetId: string) => {
     if (!sourceId || sourceId === targetId) return;
-    const s = blocks.findIndex((b) => b.id === sourceId);
-    const t = blocks.findIndex((b) => b.id === targetId);
-    if (s < 0 || t < 0) return;
-    const c = [...blocks];
-    const [m] = c.splice(s, 1);
-    c.splice(t, 0, m);
-    setBlocks(c);
-  };
+    setBlocks((prev) => {
+      const s = prev.findIndex((b) => b.id === sourceId);
+      const t = prev.findIndex((b) => b.id === targetId);
+      if (s < 0 || t < 0) return prev;
+      const c = [...prev];
+      const [m] = c.splice(s, 1);
+      c.splice(t, 0, m);
+      return c;
+    });
+  }, []);
 
   const handleAISuggestSetup = () => {
     setHeadline(projectTitle?.trim() ? `${projectTitle}: Forecast Highlights` : "Forecast Highlights");
@@ -804,7 +835,7 @@ export default function Step5Showcase() {
                 <div className="flex gap-2">
                   <Button size="sm" variant="secondary" onClick={() => moveBlock(i, "up")} disabled={i === 0}><ArrowUp className="w-4 h-4" /></Button>
                   <Button size="sm" variant="secondary" onClick={() => moveBlock(i, "down")} disabled={i === blocks.length - 1}><ArrowDown className="w-4 h-4" /></Button>
-                  <Button size="sm" variant="destructive" onClick={() => setBlocks(blocks.filter((x) => x.id !== b.id))}><Trash2 className="w-3.5 h-3.5" /></Button>
+                  <Button size="sm" variant="destructive" onClick={() => setBlocks((prev) => prev.filter((x) => x.id !== b.id))}><Trash2 className="w-3.5 h-3.5" /></Button>
                 </div>
               </div>
 
@@ -815,7 +846,14 @@ export default function Step5Showcase() {
                       {TEXT_PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
                     </select>
                   </label>
-                  <Textarea label={`Content (${styleLabel(b.style)})`} value={b.content} onChange={(e) => updateBlock(b.id, (x) => x.type === "text" ? { ...x, content: e.target.value } : x)} rows={4} />
+                  <BufferedTextarea
+                    label={`Content (${styleLabel(b.style)})`}
+                    value={b.content}
+                    rows={4}
+                    onCommit={(next) =>
+                      updateBlock(b.id, (x) => (x.type === "text" ? { ...x, content: next } : x))
+                    }
+                  />
                   <Button size="sm" variant="secondary" onClick={() => handleAISuggestText(b.id)}><Sparkles className="w-3.5 h-3.5 mr-1" />AI Suggest Text (Stub)</Button>
                 </div>
               )}
@@ -827,8 +865,21 @@ export default function Step5Showcase() {
                       {GRAPH_ASSETS.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
                     </select>
                   </label>
-                  <Input label="Graph Title" value={b.title} onChange={(e) => updateBlock(b.id, (x) => x.type === "graph" ? { ...x, title: e.target.value } : x)} />
-                  <Textarea label="Graph Caption" value={b.caption} onChange={(e) => updateBlock(b.id, (x) => x.type === "graph" ? { ...x, caption: e.target.value } : x)} rows={3} />
+                  <BufferedInput
+                    label="Graph Title"
+                    value={b.title}
+                    onCommit={(next) =>
+                      updateBlock(b.id, (x) => (x.type === "graph" ? { ...x, title: next } : x))
+                    }
+                  />
+                  <BufferedTextarea
+                    label="Graph Caption"
+                    value={b.caption}
+                    rows={3}
+                    onCommit={(next) =>
+                      updateBlock(b.id, (x) => (x.type === "graph" ? { ...x, caption: next } : x))
+                    }
+                  />
                   <Button size="sm" variant="secondary" onClick={() => handleAICaption(b.id)}><Sparkles className="w-3.5 h-3.5 mr-1" />AI Caption (Stub)</Button>
                   {renderWindowControls(b)}
                   {renderGraph(b)}
@@ -875,6 +926,75 @@ export default function Step5Showcase() {
         </div>
       )}
     </div>
+  );
+}
+
+function BufferedInput({
+  label,
+  value,
+  onCommit,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onCommit: (next: string) => void;
+  placeholder?: string;
+}) {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  const commit = () => {
+    if (draft !== value) onCommit(draft);
+  };
+
+  return (
+    <Input
+      label={label}
+      value={draft}
+      placeholder={placeholder}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+    />
+  );
+}
+
+function BufferedTextarea({
+  label,
+  value,
+  onCommit,
+  rows = 3,
+}: {
+  label: string;
+  value: string;
+  onCommit: (next: string) => void;
+  rows?: number;
+}) {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  const commit = () => {
+    if (draft !== value) onCommit(draft);
+  };
+
+  return (
+    <Textarea
+      label={label}
+      value={draft}
+      rows={rows}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+    />
   );
 }
 
