@@ -19,6 +19,7 @@ from app.core.processing import (
     load_dataframe,
 )
 from app.core.forecasting import run_forecast
+from app.core.preprocessing import clean_dataframe_for_training
 
 router = APIRouter()
 
@@ -151,25 +152,39 @@ async def train_model(req: TrainRequest):
     if req.project_id not in _dataframes:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    df = _dataframes[req.project_id].copy()
+    raw_df = _dataframes[req.project_id].copy()
+    try:
+        df, prep_report = clean_dataframe_for_training(
+            raw_df,
+            date_col=req.date_col,
+            target_col=req.target_col,
+            driver_cols=None,
+            min_rows=20,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Preprocessing error: {e}")
 
-    if req.date_col not in df.columns:
-        raise HTTPException(status_code=400, detail=f"Date column '{req.date_col}' not found")
-    if req.target_col not in df.columns:
-        raise HTTPException(status_code=400, detail=f"Target column '{req.target_col}' not found")
+    if not prep_report["ready"]["ready"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Data not ready for training: {prep_report['ready']['errors']}",
+        )
+
+    date_col = prep_report["date_col"]
+    target_col = prep_report["target_col"]
 
     # Prepare time series
-    df[req.date_col] = pd.to_datetime(df[req.date_col])
-    df = df.sort_values(req.date_col).reset_index(drop=True)
-    df = df.set_index(req.date_col)
+    df = df.sort_values(date_col).reset_index(drop=True)
+    df = df.set_index(date_col)
 
     # Infer frequency
     freq = pd.infer_freq(df.index)
     if freq is None:
         freq = "W"
     df = df.asfreq(freq)
+    df[target_col] = df[target_col].interpolate(method="linear").ffill().bfill()
 
-    series = df[req.target_col].dropna().astype(float)
+    series = df[target_col].dropna().astype(float)
 
     if len(series) < 20:
         raise HTTPException(
