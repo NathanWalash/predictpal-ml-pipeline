@@ -189,6 +189,8 @@ function DebugPanel() {
   const forecastResults = useBuildStore((s) => s.forecastResults);
   const widgets = useBuildStore((s) => s.widgets);
   const tags = useBuildStore((s) => s.tags);
+  const pinAsDebugInExplore = useBuildStore((s) => s.pinAsDebugInExplore);
+  const setPinAsDebugInExplore = useBuildStore((s) => s.setPinAsDebugInExplore);
   const isLoading = useBuildStore((s) => s.isLoading);
 
   const debugData = {
@@ -219,6 +221,7 @@ function DebugPanel() {
     hasForecastResults: !!forecastResults,
     widgetCount: widgets.length,
     tags,
+    pinAsDebugInExplore,
     isLoading,
   };
 
@@ -252,6 +255,18 @@ function DebugPanel() {
             Step {s}
           </button>
         ))}
+      </div>
+
+      <div className="mb-3 rounded-lg border border-amber-800/50 bg-amber-900/20 px-3 py-2">
+        <label className="inline-flex items-center gap-2 text-xs text-amber-200 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={pinAsDebugInExplore}
+            onChange={(e) => setPinAsDebugInExplore(e.target.checked)}
+            className="h-4 w-4 rounded border-amber-700 bg-slate-900 text-amber-400 focus:ring-amber-500"
+          />
+          Pin Step 5 publish as persistent debug sample in Explore
+        </label>
       </div>
 
       <pre className="text-xs text-amber-300/80 overflow-x-auto max-h-60 overflow-y-auto scrollbar-thin">

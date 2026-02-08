@@ -206,6 +206,8 @@ interface BuildState {
   setSummary: (s: string) => void;
   tags: string[];
   setTags: (t: string[]) => void;
+  pinAsDebugInExplore: boolean;
+  setPinAsDebugInExplore: (value: boolean) => void;
 
   // Loading
   isLoading: boolean;
@@ -263,6 +265,7 @@ const buildInitial = {
   analysisSlide: null as AnalysisSlideState | null,
   summary: "",
   tags: [] as string[],
+  pinAsDebugInExplore: false,
   isLoading: false,
   loadingMessage: "",
   chatMessages: [
@@ -420,6 +423,7 @@ export const useBuildStore = create<BuildState>()((set) => ({
 
   setSummary: (s) => set({ summary: s }),
   setTags: (t) => set({ tags: t }),
+  setPinAsDebugInExplore: (value) => set({ pinAsDebugInExplore: value }),
 
   setLoading: (loading) => set({ isLoading: loading }),
   setLoadingMessage: (msg) => set({ loadingMessage: msg }),

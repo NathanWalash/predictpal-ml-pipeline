@@ -197,6 +197,7 @@ export default function Step5Showcase() {
     setSummary,
     tags,
     setTags,
+    pinAsDebugInExplore,
     completeStep,
     prevStep,
     isLoading,
@@ -220,7 +221,6 @@ export default function Step5Showcase() {
   const [notice, setNotice] = useState("");
   const [publishError, setPublishError] = useState("");
   const [published, setPublished] = useState(false);
-  const [pinAsDebug, setPinAsDebug] = useState(false);
   const [isSuggestingSetup, setIsSuggestingSetup] = useState(false);
   const [captionBusyBlockId, setCaptionBusyBlockId] = useState<string | null>(null);
 
@@ -693,7 +693,10 @@ export default function Step5Showcase() {
     }
     if (assetId === "driver-series") {
       if (driverData.length === 0) return "Driver series chart (temperature and holiday count).";
-      const maxHoliday = Math.max(...driverData.map((row) => row.holiday_count));
+      const holidayValues = driverData
+        .map((row) => Number(row.holiday_count))
+        .filter((value) => Number.isFinite(value));
+      const maxHoliday = holidayValues.length > 0 ? Math.max(...holidayValues) : 0;
       return `Driver signals chart combining temperature and holiday count (max holidays per point: ${maxHoliday}).`;
     }
     if (importanceData.length === 0) return "Feature importance ranking chart.";
@@ -978,7 +981,7 @@ export default function Step5Showcase() {
       notebook_blocks: blocks,
       published: true,
       publish_mode: "live",
-      pin_as_debug: pinAsDebug,
+      pin_as_debug: pinAsDebugInExplore,
       author_user_id: user?.user_id || null,
       author_username: user?.username || null,
       horizon,
@@ -1075,7 +1078,7 @@ export default function Step5Showcase() {
       };
       upsertLocalStory(localStory);
 
-      if (pinAsDebug) {
+      if (pinAsDebugInExplore) {
         const debugStory: StoryDetail = {
           story_id: `debug-${finalStoryId}`,
           project_id: finalStoryId,
@@ -1118,7 +1121,7 @@ export default function Step5Showcase() {
         <PartyPopper className="w-16 h-16 text-teal-400 mb-6" />
         <h2 className="text-3xl font-bold text-white mb-3">Notebook Story Published</h2>
         <p className="text-slate-400 max-w-lg mb-8">&ldquo;{headline || projectTitle || "Forecast Notebook Post"}&rdquo; is ready.</p>
-        {pinAsDebug ? (
+        {pinAsDebugInExplore ? (
           <p className="text-sm text-amber-300 mb-6">
             This story was also pinned as a persistent Debug sample for the Explore page.
           </p>
@@ -1304,15 +1307,6 @@ export default function Step5Showcase() {
           <div className="rounded-xl border border-slate-700 bg-slate-900/40 px-4 py-3 text-sm text-slate-400">
             <p className="font-medium text-slate-300">Project Overview</p>
             <p className="mt-1">{projectTitle || "Untitled"} ({useCase || "General"}) | Baseline: {baselineModel || "-"} | Multivariate: {multivariateModel || "-"} | Horizon: {horizon} | Author: {user?.username || "anonymous"}</p>
-            <label className="mt-3 inline-flex items-center gap-2 text-sm text-amber-200">
-              <input
-                type="checkbox"
-                checked={pinAsDebug}
-                onChange={(e) => setPinAsDebug(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-amber-400 focus:ring-amber-500"
-              />
-              Pin this as a persistent Debug sample in Explore
-            </label>
           </div>
         </div>
       )}
