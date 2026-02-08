@@ -5,9 +5,12 @@ import { useBuildStore, useAuthStore } from "@/lib/store";
 import {
   createProject,
   getSampleAnalysisBundle,
+  type StoryDetail,
   type AnalysisBundle,
   updateProject,
 } from "@/lib/api";
+import { upsertPersistedDebugStory } from "@/lib/debugStories";
+import { upsertLocalStory } from "@/lib/localStories";
 import { Badge, Button, Input, Textarea } from "@/components/ui";
 import {
   ArrowDown,
@@ -213,6 +216,7 @@ export default function Step5Showcase() {
   const [notice, setNotice] = useState("");
   const [publishError, setPublishError] = useState("");
   const [published, setPublished] = useState(false);
+  const [pinAsDebug, setPinAsDebug] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -809,6 +813,7 @@ export default function Step5Showcase() {
       notebook_blocks: blocks,
       published: true,
       publish_mode: "live",
+      pin_as_debug: pinAsDebug,
       author_user_id: user?.user_id || null,
       author_username: user?.username || null,
       horizon,
@@ -825,10 +830,10 @@ export default function Step5Showcase() {
         ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
         : null;
 
-    const ensureProjectId = async () => {
+    const ensureProjectId = async (): Promise<string | null> => {
       if (projectId) return projectId;
       if (!user) {
-        throw new Error("Please sign in before publishing so we can save your story.");
+        return null;
       }
       const created = await createProject(
         user.user_id,
@@ -842,32 +847,93 @@ export default function Step5Showcase() {
 
     try {
       let targetProjectId = await ensureProjectId();
+      let localOnly = targetProjectId === null;
 
-      try {
-        await updateProject(targetProjectId, 5, payload);
-      } catch (err: unknown) {
-        const status =
-          typeof err === "object" &&
-          err !== null &&
-          "response" in err &&
-          typeof (err as { response?: { status?: number } }).response?.status === "number"
-            ? (err as { response?: { status?: number } }).response?.status
-            : null;
-
-        if (status === 404 && user) {
-          // Backend store may have restarted and lost the in-memory project.
-          const recreated = await createProject(
-            user.user_id,
-            headline.trim() || projectTitle || "Forecast Notebook Post",
-            summary || projectDescription || "",
-            useCase || ""
-          );
-          targetProjectId = recreated.project_id as string;
-          setProjectId(targetProjectId);
+      if (targetProjectId) {
+        try {
           await updateProject(targetProjectId, 5, payload);
-        } else {
-          throw err;
+        } catch (err: unknown) {
+          const status =
+            typeof err === "object" &&
+            err !== null &&
+            "response" in err &&
+            typeof (err as { response?: { status?: number } }).response?.status === "number"
+              ? (err as { response?: { status?: number } }).response?.status
+              : null;
+
+          if (status === 404 && user) {
+            // Backend store may have restarted and lost the in-memory project.
+            const recreated = await createProject(
+              user.user_id,
+              headline.trim() || projectTitle || "Forecast Notebook Post",
+              summary || projectDescription || "",
+              useCase || ""
+            );
+            targetProjectId = recreated.project_id as string;
+            setProjectId(targetProjectId);
+            await updateProject(targetProjectId, 5, payload);
+          } else if (status === 404 && !user) {
+            // Anonymous flow fallback: publish locally so Explore can still open it.
+            localOnly = true;
+            targetProjectId = null;
+          } else {
+            throw err;
+          }
         }
+      }
+
+      const nowIso = new Date().toISOString();
+      const finalStoryId = targetProjectId ?? `local-${nowIso}-${Math.random().toString(36).slice(2, 7)}`;
+      const coverGraph = blocks.find((b) => b.type === "graph")?.assetId || null;
+
+      const localStory: StoryDetail = {
+        story_id: finalStoryId,
+        project_id: finalStoryId,
+        title: headline.trim() || projectTitle || "Forecast Notebook Post",
+        description: summary || projectDescription || "",
+        author: user?.username || "anonymous",
+        user_id: user?.user_id || "anonymous",
+        categories: tags.length > 0 ? tags : ["demo"],
+        published_at: nowIso,
+        created_at: nowIso,
+        use_case: useCase || "general",
+        horizon: horizon ?? null,
+        baseline_model: baselineModel || null,
+        multivariate_model: multivariateModel || null,
+        drivers: selectedDrivers || [],
+        block_count: blocks.length,
+        cover_graph: coverGraph,
+        source: "user",
+        is_debug: false,
+        publish_mode: localOnly ? "local-anonymous" : "live",
+        notebook_blocks: blocks,
+      };
+      upsertLocalStory(localStory);
+
+      if (pinAsDebug) {
+        const debugStory: StoryDetail = {
+          story_id: `debug-${finalStoryId}`,
+          project_id: finalStoryId,
+          title: headline.trim() || projectTitle || "Forecast Notebook Post",
+          description: summary || projectDescription || "",
+          author: user?.username || "anonymous",
+          user_id: user?.user_id || "anonymous",
+          categories: tags.length > 0 ? tags : ["demo"],
+          published_at: nowIso,
+          created_at: nowIso,
+          use_case: useCase || "general",
+          horizon: horizon ?? null,
+          baseline_model: baselineModel || null,
+          multivariate_model: multivariateModel || null,
+          drivers: selectedDrivers || [],
+          block_count: blocks.length,
+          cover_graph: coverGraph,
+          source: "debug",
+          is_debug: true,
+          publish_mode: "debug-pinned",
+          notebook_blocks: blocks,
+        };
+        upsertPersistedDebugStory(debugStory);
       }
 
       completeStep(5);
@@ -887,6 +953,11 @@ export default function Step5Showcase() {
         <PartyPopper className="w-16 h-16 text-teal-400 mb-6" />
         <h2 className="text-3xl font-bold text-white mb-3">Notebook Story Published</h2>
         <p className="text-slate-400 max-w-lg mb-8">&ldquo;{headline || projectTitle || "Forecast Notebook Post"}&rdquo; is ready.</p>
+        {pinAsDebug ? (
+          <p className="text-sm text-amber-300 mb-6">
+            This story was also pinned as a persistent Debug sample for the Explore page.
+          </p>
+        ) : null}
         <div className="flex gap-3">
           <Button size="lg" variant="secondary" onClick={() => (window.location.href = "/explore")}>View Explore</Button>
           <Button size="lg" onClick={() => (window.location.href = "/create")}>Build Another</Button>
@@ -1062,6 +1133,15 @@ export default function Step5Showcase() {
           <div className="rounded-xl border border-slate-700 bg-slate-900/40 px-4 py-3 text-sm text-slate-400">
             <p className="font-medium text-slate-300">Project Overview</p>
             <p className="mt-1">{projectTitle || "Untitled"} ({useCase || "General"}) | Baseline: {baselineModel || "-"} | Multivariate: {multivariateModel || "-"} | Horizon: {horizon} | Author: {user?.username || "anonymous"}</p>
+            <label className="mt-3 inline-flex items-center gap-2 text-sm text-amber-200">
+              <input
+                type="checkbox"
+                checked={pinAsDebug}
+                onChange={(e) => setPinAsDebug(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-amber-400 focus:ring-amber-500"
+              />
+              Pin this as a persistent Debug sample in Explore
+            </label>
           </div>
         </div>
       )}

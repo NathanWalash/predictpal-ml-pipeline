@@ -1,6 +1,7 @@
 import type { StoryDetail } from "@/lib/api";
 
 const now = new Date().toISOString();
+const PERSISTED_DEBUG_STORIES_KEY = "hackathon.persisted_debug_stories.v1";
 
 export const DEBUG_STORIES: StoryDetail[] = [
   {
@@ -8,7 +9,7 @@ export const DEBUG_STORIES: StoryDetail[] = [
     project_id: "debug-weekly-retail",
     title: "Debug Demo: Weekly Retail Forecast Walkthrough",
     description:
-      "Sample story used for demos. Shows how a post is structured with text and charts.",
+      "A full walkthrough of a weekly retail run, from model evaluation on the held-out period to a practical forward forecast that can be shared with non-technical stakeholders.",
     author: "debug_bot",
     user_id: "debug",
     categories: ["retail", "weekly", "demo"],
@@ -63,7 +64,7 @@ export const DEBUG_STORIES: StoryDetail[] = [
     project_id: "debug-energy-patterns",
     title: "Debug Demo: Energy Demand Patterns",
     description:
-      "Template post focused on explanatory sections and driver behavior.",
+      "A driver-first energy narrative that explains demand movement using weather and calendar context, then links those signals back to model confidence and forecast interpretation.",
     author: "debug_bot",
     user_id: "debug",
     categories: ["energy", "operations", "demo"],
@@ -118,7 +119,7 @@ export const DEBUG_STORIES: StoryDetail[] = [
     project_id: "debug-health-brief",
     title: "Debug Demo: Health Forecast Brief",
     description:
-      "Short summary style post for quick share-outs in presentations.",
+      "A concise health operations brief designed for quick decisions, highlighting recent model error behavior and the near-term forecast window in a presentation-friendly format.",
     author: "debug_bot",
     user_id: "debug",
     categories: ["health", "weekly", "demo"],
@@ -163,6 +164,45 @@ export const DEBUG_STORIES: StoryDetail[] = [
   },
 ];
 
+function readPersistedDebugStories(): StoryDetail[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(PERSISTED_DEBUG_STORIES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as StoryDetail[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePersistedDebugStories(stories: StoryDetail[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(PERSISTED_DEBUG_STORIES_KEY, JSON.stringify(stories));
+}
+
+export function getPersistedDebugStories(): StoryDetail[] {
+  return readPersistedDebugStories();
+}
+
+export function upsertPersistedDebugStory(story: StoryDetail) {
+  const existing = readPersistedDebugStories();
+  const next = [story, ...existing.filter((s) => s.story_id !== story.story_id)];
+  writePersistedDebugStories(next);
+}
+
+export function getAllDebugStories(): StoryDetail[] {
+  const persisted = readPersistedDebugStories();
+  const seen = new Set<string>();
+  const merged: StoryDetail[] = [];
+  for (const story of [...persisted, ...DEBUG_STORIES]) {
+    if (seen.has(story.story_id)) continue;
+    seen.add(story.story_id);
+    merged.push(story);
+  }
+  return merged;
+}
+
 export function getDebugStory(storyId: string): StoryDetail | undefined {
-  return DEBUG_STORIES.find((story) => story.story_id === storyId);
+  return getAllDebugStories().find((story) => story.story_id === storyId);
 }

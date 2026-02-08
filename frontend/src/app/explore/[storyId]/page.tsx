@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { Badge, Button } from "@/components/ui";
 import { getStory, type StoryDetail } from "@/lib/api";
 import { getDebugStory } from "@/lib/debugStories";
+import { getLocalStory, upsertLocalStory } from "@/lib/localStories";
 import { StoryNotebook } from "@/components/story/StoryNotebook";
 import { ArrowLeft, Bug, Loader2, UserRound } from "lucide-react";
 
@@ -43,10 +44,18 @@ export default function StoryDetailPage() {
         return;
       }
 
+      const localStory = getLocalStory(storyId);
+      if (localStory) {
+        if (mounted) setStory(localStory);
+        if (mounted) setLoading(false);
+        return;
+      }
+
       try {
         const data = await getStory(storyId);
         if (!mounted) return;
         setStory(data);
+        upsertLocalStory(data);
       } catch {
         if (!mounted) return;
         setLoadError("Story not found or unavailable.");

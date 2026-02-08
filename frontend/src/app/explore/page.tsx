@@ -4,11 +4,11 @@ import { useEffect, useMemo, useState, type ComponentType } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui";
 import { listStories, type StoryCard } from "@/lib/api";
-import { DEBUG_STORIES } from "@/lib/debugStories";
+import { getAllDebugStories } from "@/lib/debugStories";
+import { getLocalStories } from "@/lib/localStories";
 import {
   BarChart3,
   Briefcase,
-  Bug,
   CalendarDays,
   CircleDollarSign,
   HeartPulse,
@@ -59,6 +59,34 @@ function includesTerm(story: StoryCard, term: string) {
   return haystack.includes(term);
 }
 
+function norm(value: string | null | undefined) {
+  return (value || "").trim().toLowerCase();
+}
+
+function storySignature(story: StoryCard) {
+  const categories = [...story.categories].sort((a, b) => a.localeCompare(b)).join("|");
+  return [norm(story.title), norm(story.author), norm(story.description), categories].join("::");
+}
+
+function isNewer(a: StoryCard, b: StoryCard) {
+  return (a.published_at || a.created_at || "") > (b.published_at || b.created_at || "");
+}
+
+function isPinnedDemoStory(story: StoryCard) {
+  const title = norm(story.title);
+  return title.includes("from fog to forecasts");
+}
+
+function getAvailabilityRank(
+  story: StoryCard,
+  localStoryIds: Set<string>,
+  debugStoryIds: Set<string>
+) {
+  if (localStoryIds.has(story.story_id)) return 2;
+  if (debugStoryIds.has(story.story_id)) return 1;
+  return 0;
+}
+
 function formatDate(value: string | null) {
   if (!value) return "Draft date";
   const ts = Date.parse(value);
@@ -76,6 +104,8 @@ export default function ExplorePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [liveStories, setLiveStories] = useState<StoryCard[]>([]);
+  const [allDebugStories, setAllDebugStories] = useState<StoryCard[]>([]);
+  const [localStories, setLocalStories] = useState<StoryCard[]>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -92,6 +122,7 @@ export default function ExplorePage() {
         setLiveStories(res.stories || []);
       } catch {
         if (!mounted) return;
+        setLiveStories([]);
         setLoadError("Could not load live stories right now.");
       } finally {
         if (mounted) setLoading(false);
@@ -104,28 +135,94 @@ export default function ExplorePage() {
     };
   }, [query, category]);
 
+  useEffect(() => {
+    setAllDebugStories(getAllDebugStories());
+    setLocalStories(getLocalStories());
+  }, []);
+
   const debugStories = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return DEBUG_STORIES.filter((story) => {
+    return allDebugStories.filter((story) => {
       if (category !== "all" && !story.categories.includes(category)) return false;
       return includesTerm(story, term);
     });
-  }, [query, category]);
+  }, [allDebugStories, query, category]);
+
+  const localStoriesFiltered = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    return localStories.filter((story) => {
+      if (category !== "all" && !story.categories.includes(category)) return false;
+      return includesTerm(story, term);
+    });
+  }, [localStories, query, category]);
+
+  const mergedLiveStories = useMemo(() => {
+    const map = new Map<string, StoryCard>();
+    for (const story of liveStories) {
+      map.set(story.story_id, story);
+    }
+    for (const story of localStoriesFiltered) {
+      if (!map.has(story.story_id)) {
+        map.set(story.story_id, story);
+      }
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => (b.published_at || "").localeCompare(a.published_at || "")
+    );
+  }, [liveStories, localStoriesFiltered]);
 
   const categories = useMemo(() => {
     const bucket = new Set<string>();
     for (const story of liveStories) {
       for (const cat of story.categories) bucket.add(cat);
     }
-    for (const story of DEBUG_STORIES) {
+    for (const story of localStories) {
+      for (const cat of story.categories) bucket.add(cat);
+    }
+    for (const story of allDebugStories) {
       for (const cat of story.categories) bucket.add(cat);
     }
     return ["all", ...Array.from(bucket).sort((a, b) => a.localeCompare(b))];
-  }, [liveStories]);
+  }, [liveStories, localStories, allDebugStories]);
 
   const allVisibleStories = useMemo(
-    () => [...liveStories, ...debugStories],
-    [liveStories, debugStories]
+    () => {
+      const localStoryIds = new Set(localStories.map((s) => s.story_id));
+      const debugStoryIds = new Set(allDebugStories.map((s) => s.story_id));
+      const bySig = new Map<string, StoryCard>();
+      for (const story of [...mergedLiveStories, ...debugStories]) {
+        const sig = storySignature(story);
+        const existing = bySig.get(sig);
+        if (!existing) {
+          bySig.set(sig, story);
+          continue;
+        }
+        const existingRank = getAvailabilityRank(existing, localStoryIds, debugStoryIds);
+        const nextRank = getAvailabilityRank(story, localStoryIds, debugStoryIds);
+        if (nextRank > existingRank) {
+          bySig.set(sig, story);
+          continue;
+        }
+        if (nextRank < existingRank) {
+          continue;
+        }
+        if (existing.is_debug && !story.is_debug) {
+          bySig.set(sig, story);
+          continue;
+        }
+        if (existing.is_debug === story.is_debug && isNewer(story, existing)) {
+          bySig.set(sig, story);
+        }
+      }
+      return Array.from(bySig.values()).sort((a, b) => {
+        const aPinned = isPinnedDemoStory(a);
+        const bPinned = isPinnedDemoStory(b);
+        if (aPinned && !bPinned) return -1;
+        if (!aPinned && bPinned) return 1;
+        return (b.published_at || b.created_at || "").localeCompare(a.published_at || a.created_at || "");
+      });
+    },
+    [allDebugStories, debugStories, localStories, mergedLiveStories]
   );
   const contributorCount = useMemo(
     () => new Set(allVisibleStories.map((s) => s.author)).size,
@@ -158,8 +255,8 @@ export default function ExplorePage() {
                 <p className="text-2xl font-bold text-white mt-1">{contributorCount}</p>
               </div>
               <div className="rounded-xl border border-slate-700 bg-slate-900/50 p-4">
-                <p className="text-xs text-slate-500">Debug samples</p>
-                <p className="text-2xl font-bold text-white mt-1">{debugStories.length}</p>
+                <p className="text-xs text-slate-500">Categories</p>
+                <p className="text-2xl font-bold text-white mt-1">{Math.max(categories.length - 1, 0)}</p>
               </div>
             </div>
 
@@ -208,9 +305,9 @@ export default function ExplorePage() {
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-white inline-flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-teal-400" />
-              Live Published Stories
+              Stories
             </h2>
-            {loading ? <Badge variant="default">Loading...</Badge> : <Badge variant="success">{liveStories.length} live</Badge>}
+            {loading ? <Badge variant="default">Loading...</Badge> : <Badge variant="success">{allVisibleStories.length} results</Badge>}
           </div>
 
           {loadError && (
@@ -219,14 +316,14 @@ export default function ExplorePage() {
             </div>
           )}
 
-          {!loading && liveStories.length === 0 && !loadError && (
+          {!loading && allVisibleStories.length === 0 && !loadError && (
             <div className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-8 text-sm text-slate-500 text-center">
-              No live stories match this filter yet.
+              No stories match this filter yet.
             </div>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {liveStories.map((story) => (
+            {allVisibleStories.map((story) => (
               <Link
                 href={`/explore/${story.story_id}`}
                 key={story.story_id}
@@ -236,7 +333,6 @@ export default function ExplorePage() {
                   <h3 className="text-lg font-semibold text-white group-hover:text-teal-300 transition">
                     {story.title}
                   </h3>
-                  <Badge variant="success">Live</Badge>
                 </div>
                 <p className="text-xs text-slate-500 mb-3">
                   @{story.author} • {formatDate(story.published_at)}
@@ -254,56 +350,13 @@ export default function ExplorePage() {
           </div>
         </div>
 
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-white inline-flex items-center gap-2">
-              <Bug className="w-5 h-5 text-amber-400" />
-              Debug Samples
-            </h2>
-            <Badge variant="warning">{debugStories.length} debug</Badge>
-          </div>
-
-          {debugStories.length === 0 ? (
-            <div className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-8 text-sm text-slate-500 text-center">
-              No debug samples match this filter.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {debugStories.map((story) => (
-                <Link
-                  href={`/explore/${story.story_id}`}
-                  key={story.story_id}
-                  className="rounded-2xl border border-amber-800/50 bg-amber-950/10 p-5 hover:border-amber-700/70 transition-all group"
-                >
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <h3 className="text-lg font-semibold text-white group-hover:text-amber-300 transition">
-                      {story.title}
-                    </h3>
-                    <Badge variant="warning">Debug</Badge>
-                  </div>
-                  <p className="text-xs text-slate-500 mb-3">
-                    @{story.author} • Sample content
-                  </p>
-                  <p className="text-sm text-slate-400 leading-relaxed mb-4">{story.description}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {story.categories.map((tag) => (
-                      <CategoryPill key={`${story.story_id}-${tag}`} category={tag} />
-                    ))}
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-
         <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5 text-sm text-slate-400">
           <p className="font-semibold text-slate-200 inline-flex items-center gap-2">
             <BarChart3 className="w-4 h-4 text-teal-300" />
             Publishing flow
           </p>
           <p className="mt-2">
-            Posts published in Step 5 are tagged as <span className="text-emerald-300">Live</span> and appear in this feed.
-            Debug cards are marked with a <span className="text-amber-300">Debug</span> badge so they are clearly distinguishable.
+            Stories published in Step 5 appear in this feed. Sample stories are blended into the same layout for a consistent demo view.
           </p>
         </div>
       </section>
