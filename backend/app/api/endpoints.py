@@ -14,7 +14,6 @@ from typing import Any
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 import pandas as pd
 from pydantic import BaseModel
-import pandas as pd
 
 from app.core.processing import (
     detect_date_column,
@@ -37,8 +36,8 @@ _projects: dict = {}
 _dataframes: dict = {}
 _processed_dataframes: dict = {}  # project_id -> cleaned DataFrame from Step 2
 _processed_driver_dataframes: dict = {}  # project_id -> cleaned/resampled driver DataFrame
-_driver_dataframes: dict = {}  # project_id -> driver DataFrame
-_driver_file_names: dict = {}  # project_id -> uploaded driver filename
+_driver_dataframes: dict = {}  # project_id -> list[driver DataFrame]
+_driver_file_names: dict = {}  # project_id -> list[uploaded driver filename]
 _users: dict = {}  # username -> {password_hash, user_id}
 _user_projects: dict = {}  # user_id -> [project_ids]
 _analysis_dir = OUTPUTS_DIR
@@ -356,16 +355,19 @@ async def upload_driver_file(
     date_col = detect_date_column(df)
     numeric_cols = detect_numeric_columns(df)
 
-    _driver_dataframes[pid] = df
-    _driver_file_names[pid] = file.filename or "driver_file"
+    _driver_dataframes.setdefault(pid, []).append(df)
+    driver_name = file.filename or "driver_file"
+    _driver_file_names.setdefault(pid, []).append(driver_name)
     if pid in _projects:
-        _projects[pid]["driver_file_name"] = file.filename
+        _projects[pid]["driver_file_names"] = _driver_file_names[pid]
 
     preview = get_preview(df, n=10)
 
     return {
         "project_id": pid,
-        "file_name": file.filename,
+        "file_name": driver_name,
+        "file_names": _driver_file_names.get(pid, []),
+        "file_count": len(_driver_file_names.get(pid, [])),
         "rows": len(df),
         "columns": df.columns.tolist(),
         "detected_date_col": date_col,
@@ -526,49 +528,88 @@ async def process_data(req: ProcessRequest):
 
     _processed_dataframes[req.project_id] = target_only
 
-    driver_file_name = _driver_file_names.get(req.project_id)
+    driver_files = _driver_dataframes.get(req.project_id, [])
+    driver_file_names = _driver_file_names.get(req.project_id, [])
+    driver_file_results: list[dict[str, Any]] = []
     driver_numeric_cols: list[str] = []
-    if req.project_id in _driver_dataframes:
-        raw_driver_df = _driver_dataframes[req.project_id].copy()
-        driver_file_name = driver_file_name or _projects.get(req.project_id, {}).get("driver_file_name")
+    merged_driver_df: pd.DataFrame | None = None
+    used_driver_cols: set[str] = set()
 
+    for idx, raw_driver_df in enumerate(driver_files):
+        if raw_driver_df is None or raw_driver_df.empty:
+            continue
+        driver_file_name = (
+            driver_file_names[idx]
+            if idx < len(driver_file_names)
+            else f"driver_file_{idx + 1}"
+        )
         requested_driver_date_col = req.driver_date_col or detect_date_column(raw_driver_df)
-        if requested_driver_date_col and requested_driver_date_col in raw_driver_df.columns:
-            driver_df = raw_driver_df.copy()
-            driver_df[requested_driver_date_col] = parse_datetime_series(driver_df[requested_driver_date_col])
-            driver_df = driver_df.dropna(subset=[requested_driver_date_col]).sort_values(requested_driver_date_col)
-            driver_df = driver_df.drop_duplicates(subset=[requested_driver_date_col], keep="last")
+        if not requested_driver_date_col or requested_driver_date_col not in raw_driver_df.columns:
+            continue
 
-            candidate_numeric = [
-                c for c in detect_numeric_columns(driver_df)
-                if c != requested_driver_date_col
-            ]
-            for col in candidate_numeric:
-                driver_df[col] = _coerce_numeric_series(driver_df[col])
-            driver_numeric_cols = [c for c in candidate_numeric if driver_df[c].notna().any()]
+        driver_df = raw_driver_df.copy()
+        driver_df[requested_driver_date_col] = parse_datetime_series(driver_df[requested_driver_date_col])
+        driver_df = driver_df.dropna(subset=[requested_driver_date_col]).sort_values(requested_driver_date_col)
+        driver_df = driver_df.drop_duplicates(subset=[requested_driver_date_col], keep="last")
 
-            if driver_numeric_cols:
-                driver_clean = driver_df[[requested_driver_date_col, *driver_numeric_cols]].copy()
-                driver_clean = driver_clean.set_index(requested_driver_date_col).sort_index()
-                driver_clean = driver_clean.resample(resample_freq).mean(numeric_only=True)
-                driver_clean = driver_clean.dropna(how="all")
-                driver_clean = driver_clean.reset_index().rename(
-                    columns={requested_driver_date_col: date_col}
-                )
+        candidate_numeric = [
+            c for c in detect_numeric_columns(driver_df)
+            if c != requested_driver_date_col
+        ]
+        for col in candidate_numeric:
+            driver_df[col] = _coerce_numeric_series(driver_df[col])
+        resolved_numeric_cols = [c for c in candidate_numeric if driver_df[c].notna().any()]
 
-                # If a single generic "value" column came from a temp file,
-                # expose it with a stable semantic name expected by Step 3.
-                if len(driver_numeric_cols) == 1:
-                    only_col = driver_numeric_cols[0]
-                    name_key = _normalized_name(only_col)
-                    file_key = _normalized_name(driver_file_name or "")
-                    if name_key in {"value", "val"} and any(
-                        token in file_key for token in {"temp", "meantemp", "temperature"}
-                    ):
-                        driver_clean = driver_clean.rename(columns={only_col: "temp_mean"})
-                        driver_numeric_cols = ["temp_mean"]
+        if not resolved_numeric_cols:
+            continue
 
-                _processed_driver_dataframes[req.project_id] = driver_clean
+        driver_clean = driver_df[[requested_driver_date_col, *resolved_numeric_cols]].copy()
+        driver_clean = driver_clean.set_index(requested_driver_date_col).sort_index()
+        driver_clean = driver_clean.resample(resample_freq).mean(numeric_only=True)
+        driver_clean = driver_clean.dropna(how="all")
+        driver_clean = driver_clean.reset_index().rename(
+            columns={requested_driver_date_col: date_col}
+        )
+
+        # If a single generic "value" column came from a temp file,
+        # expose it with a stable semantic name expected by Step 3.
+        if len(resolved_numeric_cols) == 1:
+            only_col = resolved_numeric_cols[0]
+            name_key = _normalized_name(only_col)
+            file_key = _normalized_name(driver_file_name or "")
+            if name_key in {"value", "val"} and any(
+                token in file_key for token in {"temp", "meantemp", "temperature"}
+            ):
+                driver_clean = driver_clean.rename(columns={only_col: "temp_mean"})
+                resolved_numeric_cols = ["temp_mean"]
+
+        renamed_cols: list[str] = []
+        file_suffix = _normalized_name(driver_file_name) or f"driver_{idx + 1}"
+        for col in resolved_numeric_cols:
+            candidate = col
+            if candidate in used_driver_cols:
+                candidate = f"{candidate}_{file_suffix}"
+            if candidate != col:
+                driver_clean = driver_clean.rename(columns={col: candidate})
+            renamed_cols.append(candidate)
+            used_driver_cols.add(candidate)
+
+        if merged_driver_df is None:
+            merged_driver_df = driver_clean
+        else:
+            merged_driver_df = merged_driver_df.merge(driver_clean, on=date_col, how="outer")
+
+        driver_file_results.append(
+            {
+                "file_name": driver_file_name,
+                "numeric_columns": renamed_cols,
+            }
+        )
+        driver_numeric_cols.extend(renamed_cols)
+
+    if merged_driver_df is not None and not merged_driver_df.empty:
+        merged_driver_df = merged_driver_df.sort_values(date_col).reset_index(drop=True)
+        _processed_driver_dataframes[req.project_id] = merged_driver_df
 
     numeric_cols = detect_numeric_columns(target_only)
     preview = get_preview(target_only, n=10)
@@ -585,8 +626,10 @@ async def process_data(req: ProcessRequest):
         "report": prep_report,
         "note": process_note,
         "driver": {
-            "file_name": driver_file_name,
+            "file_name": driver_file_results[0]["file_name"] if driver_file_results else None,
+            "file_names": [item["file_name"] for item in driver_file_results],
             "numeric_columns": driver_numeric_cols,
+            "files": driver_file_results,
         },
     }
 

@@ -62,16 +62,9 @@ export default function Step1GetStarted() {
     columnDtypes,
     removeUploadedFile,
     clearFileInfo,
-    driverFileName,
-    driverColumns,
+    driverFiles,
     driverNumericColumns,
-    driverDetectedDateCol,
-    driverRowCount,
-    driverPreviewData,
-    driverColumnDtypes,
-    setDriverInfo,
-    clearDriverInfo,
-    projectId: storedProjectId,
+    addDriverInfo,
   } = useBuildStore();
   const user = useAuthStore((s) => s.user);
 
@@ -86,8 +79,22 @@ export default function Step1GetStarted() {
   const [driverErrorMsg, setDriverErrorMsg] = useState("");
   const [driverLoading, setDriverLoading] = useState(false);
 
+  const getApiErrorMessage = (err: unknown, fallback: string) => {
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      "response" in err &&
+      typeof (err as { response?: unknown }).response === "object" &&
+      (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+    ) {
+      return (err as { response: { data: { detail: string } } }).response.data.detail;
+    }
+    return fallback;
+  };
+
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
+      if (useBuildStore.getState().uploadedFiles.length > 0) return;
       if (acceptedFiles.length === 0) return;
       const file = acceptedFiles[0];
       setLoading(true);
@@ -123,10 +130,8 @@ export default function Step1GetStarted() {
           columnDtypes: result.dtypes || {},
         });
         setUploadStatus("success");
-      } catch (err: any) {
-        setErrorMsg(
-          err?.response?.data?.detail || "Upload failed. Try again."
-        );
+      } catch (err: unknown) {
+        setErrorMsg(getApiErrorMessage(err, "Upload failed. Try again."));
         setUploadStatus("error");
       } finally {
         setLoading(false);
@@ -148,37 +153,37 @@ export default function Step1GetStarted() {
   const onDropDrivers = useCallback(
     async (acceptedFiles: File[]) => {
       if (acceptedFiles.length === 0) return;
-      const file = acceptedFiles[0];
       setDriverLoading(true);
       setDriverUploadStatus("idle");
       setDriverErrorMsg("");
 
       try {
-        const activeProjectId = useBuildStore.getState().projectId;
-        const result = await uploadDriverFile(file, activeProjectId || undefined);
-        if (result.project_id) {
-          setProjectId(result.project_id);
+        let activeProjectId = useBuildStore.getState().projectId;
+        for (const file of acceptedFiles) {
+          const result = await uploadDriverFile(file, activeProjectId || undefined);
+          if (result.project_id) {
+            setProjectId(result.project_id);
+            activeProjectId = result.project_id;
+          }
+          addDriverInfo({
+            fileName: file.name,
+            columns: result.columns || [],
+            numericColumns: result.numeric_columns || [],
+            detectedDateCol: result.detected_date_col || null,
+            rowCount: result.rows || 0,
+            previewData: result.preview || [],
+            columnDtypes: result.dtypes || {},
+          });
         }
-        setDriverInfo({
-          fileName: file.name,
-          columns: result.columns || [],
-          numericColumns: result.numeric_columns || [],
-          detectedDateCol: result.detected_date_col || null,
-          rowCount: result.rows || 0,
-          previewData: result.preview || [],
-          columnDtypes: result.dtypes || {},
-        });
         setDriverUploadStatus("success");
-      } catch (err: any) {
-        setDriverErrorMsg(
-          err?.response?.data?.detail || "Driver upload failed. Try again."
-        );
+      } catch (err: unknown) {
+        setDriverErrorMsg(getApiErrorMessage(err, "Driver upload failed. Try again."));
         setDriverUploadStatus("error");
       } finally {
         setDriverLoading(false);
       }
     },
-    [setDriverInfo, setProjectId]
+    [addDriverInfo, setProjectId]
   );
 
   const dropzoneAccept = {
@@ -201,7 +206,6 @@ export default function Step1GetStarted() {
   } = useDropzone({
     onDrop: onDropDrivers,
     accept: dropzoneAccept,
-    maxFiles: 1,
   });
 
   const canContinue =
@@ -264,28 +268,34 @@ export default function Step1GetStarted() {
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
         <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
           <FolderUp className="w-5 h-5 text-teal-300" />
-          Upload Data
+          Upload Target Data
         </h3>
 
-        <div
-          {...getRootProps()}
-          className={`border-2 border-dashed rounded-2xl p-10 text-center transition-all cursor-pointer ${
-            isDragActive
-              ? "border-teal-500 bg-teal-900/10"
-              : "border-slate-700 bg-slate-800/30 hover:border-slate-600"
-          }`}
-        >
-          <input {...getInputProps()} />
-          <Upload className="w-10 h-10 text-slate-500 mx-auto mb-3" />
-          <p className="text-slate-400 font-medium">
-            {isDragActive
-              ? "Drop your file here"
-              : "Drag and drop a CSV or Excel file, or click to choose one"}
-          </p>
-          <p className="text-xs text-slate-600 mt-1">
-            Use a file with a date column and at least one number column
-          </p>
-        </div>
+        {uploadedFiles.length === 0 ? (
+          <div
+            {...getRootProps()}
+            className={`border-2 border-dashed rounded-2xl p-10 text-center transition-all cursor-pointer ${
+              isDragActive
+                ? "border-teal-500 bg-teal-900/10"
+                : "border-slate-700 bg-slate-800/30 hover:border-slate-600"
+            }`}
+          >
+            <input {...getInputProps()} />
+            <Upload className="w-10 h-10 text-slate-500 mx-auto mb-3" />
+            <p className="text-slate-400 font-medium">
+              {isDragActive
+                ? "Drop your file here"
+                : "Drag and drop a CSV or Excel file, or click to choose one"}
+            </p>
+            <p className="text-xs text-slate-600 mt-1">
+              Use a file with a date column and at least one number column
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-emerald-900/40 bg-emerald-950/20 px-4 py-3 text-sm text-emerald-300">
+            Target file uploaded. Remove it first to upload a different target file.
+          </div>
+        )}
 
         {/* Status */}
         {isLoading && (
@@ -350,128 +360,80 @@ export default function Step1GetStarted() {
           Optional: add extra data like weather, promotions, or events to help the model learn.
         </p>
 
-        {!driverFileName ? (
-          <>
-            <div
-              {...getDriverRootProps()}
-              className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer ${
-                isDriverDragActive
-                  ? "border-blue-500 bg-blue-900/10"
-                  : "border-slate-700 bg-slate-800/30 hover:border-slate-600"
-              }`}
-            >
-              <input {...getDriverInputProps()} />
-              <TrendingUp className="w-8 h-8 text-slate-500 mx-auto mb-2" />
-              <p className="text-slate-400 font-medium text-sm">
-                {isDriverDragActive
-                  ? "Drop driver file here"
-                  : "Drag and drop a driver file, or click to choose one"}
+        <div
+          {...getDriverRootProps()}
+          className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer ${
+            isDriverDragActive
+              ? "border-blue-500 bg-blue-900/10"
+              : "border-slate-700 bg-slate-800/30 hover:border-slate-600"
+          }`}
+        >
+          <input {...getDriverInputProps()} />
+          <TrendingUp className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+          <p className="text-slate-400 font-medium text-sm">
+            {isDriverDragActive
+              ? "Drop driver files here"
+              : "Drag and drop one or more driver files, or click to choose"}
+          </p>
+          <p className="text-xs text-slate-600 mt-1">
+            Use the same date format as your main dataset
+          </p>
+        </div>
+
+        {driverLoading && (
+          <div className="mt-3 flex items-center gap-3 text-blue-400 text-sm">
+            <div className="w-4 h-4 border-2 border-blue-400/30 border-t-blue-400 rounded-full animate-spin" />
+            Uploading & analyzing driver data...
+          </div>
+        )}
+        {driverUploadStatus === "error" && (
+          <div className="mt-3 flex items-center gap-3 text-red-400 text-sm">
+            <AlertCircle className="w-4 h-4" />
+            {driverErrorMsg}
+          </div>
+        )}
+
+        {driverFiles.length > 0 && (
+          <div className="mt-4 space-y-3">
+            <div className="text-sm text-emerald-400 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              {driverFiles.length} driver file{driverFiles.length !== 1 ? "s" : ""} loaded
+            </div>
+            <div className="grid gap-2">
+              {driverFiles.map((driver) => (
+                <div
+                  key={driver.fileName}
+                  className="rounded-xl border border-slate-700 bg-slate-800/50 p-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="inline-flex items-center gap-2 text-sm text-slate-300">
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-blue-400" />
+                      {driver.fileName}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {driver.detectedDateCol && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-900/30 border border-blue-800 text-xs text-blue-300">
+                        <Calendar className="w-3 h-3" />
+                        Date: {driver.detectedDateCol}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-300">
+                      <Hash className="w-3 h-3" />
+                      {driver.numericColumns.length} numeric column
+                      {driver.numericColumns.length !== 1 ? "s" : ""}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-300">
+                      {driver.rowCount.toLocaleString()} rows
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {driverNumericColumns.length > 0 && (
+              <p className="text-xs text-slate-500">
+                Combined numeric driver columns available: {driverNumericColumns.length}
               </p>
-              <p className="text-xs text-slate-600 mt-1">
-                Use the same date format as your main dataset
-              </p>
-            </div>
-
-            {driverLoading && (
-              <div className="mt-3 flex items-center gap-3 text-blue-400 text-sm">
-                <div className="w-4 h-4 border-2 border-blue-400/30 border-t-blue-400 rounded-full animate-spin" />
-                Uploading & analyzing driver data...
-              </div>
-            )}
-            {driverUploadStatus === "error" && (
-              <div className="mt-3 flex items-center gap-3 text-red-400 text-sm">
-                <AlertCircle className="w-4 h-4" />
-                {driverErrorMsg}
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span className="text-sm text-emerald-400">Driver file loaded</span>
-            </div>
-            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-300">
-              <FileSpreadsheet className="w-3.5 h-3.5 text-blue-400" />
-              {driverFileName}
-              <button
-                type="button"
-                onClick={() => {
-                  clearDriverInfo();
-                  setDriverUploadStatus("idle");
-                }}
-                className="ml-1 p-0.5 rounded-md text-slate-500 hover:text-red-400 hover:bg-slate-700 transition-colors"
-                aria-label="Remove driver file"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </span>
-
-            {/* Driver Summary chips */}
-            <div className="flex flex-wrap gap-2">
-              {driverDetectedDateCol && (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-900/30 border border-blue-800 text-xs text-blue-300">
-                  <Calendar className="w-3 h-3" />
-                  Date: {driverDetectedDateCol}
-                </span>
-              )}
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300">
-                <Hash className="w-3 h-3" />
-                {driverNumericColumns.length} numeric column{driverNumericColumns.length !== 1 ? "s" : ""}
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300">
-                {driverRowCount.toLocaleString()} rows
-              </span>
-            </div>
-
-            {/* Driver mini preview */}
-            {driverPreviewData.length > 0 && (
-              <div className="overflow-auto max-h-48 rounded-xl border border-slate-800">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 z-10">
-                    <tr className="bg-slate-800/90 backdrop-blur">
-                      {driverColumns.map((col) => (
-                        <th
-                          key={col}
-                          className={`px-3 py-2 text-left font-medium whitespace-nowrap border-b border-slate-700 ${
-                            col === driverDetectedDateCol
-                              ? "text-blue-400"
-                              : driverNumericColumns.includes(col)
-                              ? "text-blue-300"
-                              : "text-slate-400"
-                          }`}
-                        >
-                          <div>{col}</div>
-                          <div className="text-[10px] font-normal text-slate-600 mt-0.5">
-                            {driverColumnDtypes[col] || "-"}
-                          </div>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {driverPreviewData.slice(0, 5).map((row, i) => (
-                      <tr
-                        key={i}
-                        className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors"
-                      >
-                        {driverColumns.map((col) => (
-                          <td
-                            key={col}
-                            className="px-3 py-1.5 whitespace-nowrap text-slate-300"
-                          >
-                            {row[col] === null || row[col] === undefined ? (
-                              <span className="text-slate-600 italic">null</span>
-                            ) : (
-                              String(row[col])
-                            )}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             )}
           </div>
         )}
@@ -567,4 +529,3 @@ export default function Step1GetStarted() {
     </div>
   );
 }
-

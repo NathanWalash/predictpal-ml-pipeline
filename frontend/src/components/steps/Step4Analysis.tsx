@@ -518,6 +518,10 @@ export default function Step4Analysis() {
 
   const fmt = new Intl.NumberFormat("en-GB");
   const pct = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
+  const metrics = analysis?.manifest?.metrics;
+  const baselineRmse = Number(metrics?.baseline_rmse);
+  const multivariateRmse = Number(metrics?.multivariate_rmse);
+  const improvementPct = Number(metrics?.improvement_pct);
   const targetLabel = analysis?.manifest.data_summary.target_name || "Target";
   const slideFlow: SlideSpec[] = [
     {
@@ -677,19 +681,19 @@ export default function Step4Analysis() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <KpiCard
                   title="Baseline RMSE"
-                  value={fmt.format(analysis.manifest.metrics.baseline_rmse)}
+                  value={Number.isFinite(baselineRmse) ? fmt.format(baselineRmse) : "N/A"}
                   tone="neutral"
                   explanation="RMSE is the typical prediction miss size. Lower means the model is closer to the real value."
                 />
                 <KpiCard
                   title="Multivariate RMSE"
-                  value={fmt.format(analysis.manifest.metrics.multivariate_rmse)}
+                  value={Number.isFinite(multivariateRmse) ? fmt.format(multivariateRmse) : "N/A"}
                   tone="success"
                   explanation="Same metric for the multivariate model. Lower than baseline means better accuracy."
                 />
                 <KpiCard
                   title="Improvement"
-                  value={`${pct.format(analysis.manifest.metrics.improvement_pct)}%`}
+                  value={Number.isFinite(improvementPct) ? `${pct.format(improvementPct)}%` : "N/A"}
                   tone="success"
                   explanation="Percent drop in RMSE versus baseline. Positive means the multivariate model improved."
                 />

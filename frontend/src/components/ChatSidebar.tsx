@@ -87,7 +87,7 @@ function usePageContext(): string {
   const multivariateModel = useBuildStore((s) => s.multivariateModel);
   const selectedDrivers = useBuildStore((s) => s.selectedDrivers);
   const uploadedFiles = useBuildStore((s) => s.uploadedFiles);
-  const driverFileName = useBuildStore((s) => s.driverFileName);
+  const driverFiles = useBuildStore((s) => s.driverFiles);
   const driverNumericColumns = useBuildStore((s) => s.driverNumericColumns);
   const widgets = useBuildStore((s) => s.widgets);
   const summary = useBuildStore((s) => s.summary);
@@ -114,8 +114,8 @@ function usePageContext(): string {
         numericColumns.length
           ? `Main numeric columns detected: ${numericColumns.join(", ")}.`
           : "",
-        driverFileName
-          ? `Driver file loaded: ${driverFileName} with ${driverNumericColumns.length} numeric column(s).`
+        driverFiles.length
+          ? `Driver file(s) loaded: ${driverFiles.map((d) => d.fileName).join(", ")} with ${driverNumericColumns.length} numeric column(s) across all drivers.`
           : "No driver file loaded yet (optional in this step).",
         "Step 1 options shown to user: use-case bubbles and file upload zones for main data plus optional driver data.",
         "Guide the user on required file structure, useful driver data, and what to do before moving to Step 2.",
@@ -171,8 +171,8 @@ function usePageContext(): string {
         `Validation mode: ${asLabel(validationMode, VALIDATION_LABELS)} (${validationMode}).`,
         `Calendar features: ${calendarFeatures ? "Enabled" : "Disabled"}.`,
         `Holiday features: ${holidayFeatures ? "Enabled" : "Disabled"}.`,
-        driverFileName
-          ? `Driver file in use: ${driverFileName}. Available numeric drivers: ${driverNumericColumns.join(", ") || "none"}.`
+        driverFiles.length
+          ? `Driver file(s) in use: ${driverFiles.map((d) => d.fileName).join(", ")}. Available numeric drivers: ${driverNumericColumns.join(", ") || "none"}.`
           : "No driver file uploaded, so training can run target-only.",
         selectedDrivers.length
           ? `Selected drivers: ${selectedDrivers.join(", ")}.`
@@ -443,4 +443,3 @@ export default function ChatSidebar() {
     </div>
   );
 }
-

@@ -113,15 +113,11 @@ export default function Step2ProcessData() {
     prevStep,
     projectId,
     setFileInfo,
-    setDriverInfo,
+    setDriverInfos,
     clearDriverInfo,
     setLoading,
     setLoadingMessage,
-    driverColumns,
-    driverDetectedDateCol,
-    driverRowCount,
-    driverPreviewData,
-    driverColumnDtypes,
+    driverFiles,
   } = useBuildStore();
 
   const [processError, setProcessError] = useState("");
@@ -184,7 +180,6 @@ export default function Step2ProcessData() {
         dateCol: resolvedDateCol,
         targetCol,
         frequency: frequency || "W",
-        driverDateCol: driverDetectedDateCol || undefined,
         outlierStrategy: outlierStrategy || "keep",
         driverOutlierStrategy: driverOutlierStrategy || "keep",
       });
@@ -200,16 +195,20 @@ export default function Step2ProcessData() {
         columnDtypes: result.dtypes || {},
       });
 
-      if (result.driver?.file_name) {
-        setDriverInfo({
-          fileName: result.driver.file_name,
-          columns: driverColumns || [],
-          numericColumns: result.driver.numeric_columns || [],
-          detectedDateCol: driverDetectedDateCol || null,
-          rowCount: driverRowCount || 0,
-          previewData: driverPreviewData || [],
-          columnDtypes: driverColumnDtypes || {},
-        });
+      if (Array.isArray(result.driver?.files) && result.driver.files.length > 0) {
+        const existingByName = new Map(driverFiles.map((file) => [file.fileName, file]));
+        type ProcessedDriverFile = { file_name: string; numeric_columns?: string[] };
+        setDriverInfos(
+          result.driver.files.map((file: ProcessedDriverFile) => ({
+            fileName: file.file_name,
+            columns: existingByName.get(file.file_name)?.columns || [],
+            numericColumns: file.numeric_columns || [],
+            detectedDateCol: existingByName.get(file.file_name)?.detectedDateCol || null,
+            rowCount: existingByName.get(file.file_name)?.rowCount || 0,
+            previewData: existingByName.get(file.file_name)?.previewData || [],
+            columnDtypes: existingByName.get(file.file_name)?.columnDtypes || {},
+          }))
+        );
       } else {
         clearDriverInfo();
       }
