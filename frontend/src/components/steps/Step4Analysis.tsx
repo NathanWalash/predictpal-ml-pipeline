@@ -27,6 +27,21 @@ type SectionOption = {
   group: "core" | "advanced";
 };
 
+type SlidePhase = "evaluation" | "prediction";
+type SlideId =
+  | "summary-metrics"
+  | "test-fit"
+  | "error-trend"
+  | "feature-importance"
+  | "future-forecast"
+  | "driver-series";
+type SlideSpec = {
+  id: SlideId;
+  phase: SlidePhase;
+  title: string;
+  description: string;
+};
+
 const SECTION_OPTIONS: SectionOption[] = [
   { id: "summary", label: "Run Summary", description: "What data and models were used", group: "core" },
   { id: "metrics", label: "Model Metrics", description: "RMSE, MAE, and improvement", group: "core" },
@@ -50,10 +65,7 @@ const SECTION_OPTIONS: SectionOption[] = [
     description: "Temperature and holiday pattern",
     group: "advanced",
   },
-  { id: "forecast-table", label: "Forecast Table", description: "Raw forecast values", group: "advanced" },
 ];
-
-const ALL_SECTIONS = SECTION_OPTIONS.map((s) => s.id);
 
 type LooseRecord = Record<string, string | number | null | undefined>;
 
@@ -79,11 +91,6 @@ function formatLongDateFromTs(value: number) {
     month: "short",
     day: "2-digit",
   });
-}
-
-function formatDateString(value: string) {
-  const ts = parseTimestamp(value);
-  return ts === null ? value : formatShortDateFromTs(ts);
 }
 
 function formatAxisNumber(value: number) {
@@ -193,7 +200,7 @@ export default function Step4Analysis() {
   const [analysis, setAnalysis] = useState<AnalysisBundle | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const selectedSections = ALL_SECTIONS;
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [testRange, setTestRange] = useState<{ startTs: number | null; endTs: number | null }>({
     startTs: null,
     endTs: null,
@@ -482,10 +489,17 @@ export default function Step4Analysis() {
   const forecastWindowStartTs = forecastData.length > 0 ? forecastData[0].ts : null;
   const forecastWindowEndTs = forecastData.length > 0 ? forecastData[forecastData.length - 1].ts : null;
 
-  const forecastTableRows = useMemo(() => forecastData.slice(0, 8), [forecastData]);
-
   const handleContinue = () => {
-    const selectedWidgets = ALL_SECTIONS
+    const includeWidgetIds = [
+      "summary",
+      "metrics",
+      "test-fit",
+      "future-forecast",
+      "feature-importance",
+      "error-trend",
+      "driver-series",
+    ];
+    const selectedWidgets = includeWidgetIds
       .map((id) => {
         const section = SECTION_OPTIONS.find((s) => s.id === id);
         if (!section) return null;
@@ -504,43 +518,58 @@ export default function Step4Analysis() {
 
   const fmt = new Intl.NumberFormat("en-GB");
   const pct = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
-  const dataSummary = analysis?.manifest?.data_summary;
-  const settings = analysis?.manifest?.settings || {};
   const metrics = analysis?.manifest?.metrics;
-  const targetLabel = dataSummary?.target_name || "Target";
-  const startLabel = dataSummary?.start || "N/A";
-  const endLabel = dataSummary?.end || "N/A";
-  const rowsLabel = typeof dataSummary?.rows === "number" ? dataSummary.rows : 0;
-  const freqLabel = dataSummary?.freq || "N/A";
-  const periodNoun =
-    typeof freqLabel === "string" && freqLabel.toUpperCase().startsWith("MS")
-      ? "month"
-      : typeof freqLabel === "string" && freqLabel.toUpperCase().startsWith("W")
-        ? "week"
-        : typeof freqLabel === "string" && freqLabel.toUpperCase().startsWith("D")
-          ? "day"
-          : "period";
-  const baselineModelLabel = settings.baseline_model ? String(settings.baseline_model) : "N/A";
-  const multivariateModelLabel = settings.multivariate_model
-    ? String(settings.multivariate_model)
-    : settings.multi_model
-      ? String(settings.multi_model)
-      : "N/A";
   const baselineRmse = Number(metrics?.baseline_rmse);
   const multivariateRmse = Number(metrics?.multivariate_rmse);
   const baselineNrmsePct = Number(metrics?.baseline_nrmse_pct);
   const multivariateNrmsePct = Number(metrics?.multivariate_nrmse_pct);
   const improvementPct = Number(metrics?.improvement_pct);
-  const hasImprovement = Number.isFinite(improvementPct);
-  const improved = hasImprovement && improvementPct >= 0;
-  const nrmseImproved =
-    Number.isFinite(baselineNrmsePct) &&
-    Number.isFinite(multivariateNrmsePct) &&
-    multivariateNrmsePct <= baselineNrmsePct;
-  const evaluationSectionIds = ["summary", "metrics", "test-fit", "error-trend", "feature-importance"];
-  const predictionSectionIds = ["future-forecast", "driver-series", "forecast-table"];
-  const showEvaluation = selectedSections.some((id) => evaluationSectionIds.includes(id));
-  const showPrediction = selectedSections.some((id) => predictionSectionIds.includes(id));
+  const targetLabel = analysis?.manifest.data_summary.target_name || "Target";
+  const slideFlow: SlideSpec[] = [
+    {
+      id: "summary-metrics",
+      phase: "evaluation",
+      title: "Run Summary and Model Metrics",
+      description: "Key run context and RMSE performance in one view.",
+    },
+    {
+      id: "test-fit",
+      phase: "evaluation",
+      title: "Test Window Fit",
+      description: "Actual values versus predictions in the test period.",
+    },
+    {
+      id: "error-trend",
+      phase: "evaluation",
+      title: "Absolute Error Trend",
+      description: "How prediction error changes over time.",
+    },
+    {
+      id: "feature-importance",
+      phase: "evaluation",
+      title: "Feature Importance",
+      description: "Which input features mattered most.",
+    },
+    {
+      id: "future-forecast",
+      phase: "prediction",
+      title: "Future Forecast",
+      description: "Historical data followed by forecast lines.",
+    },
+    { id: "driver-series", phase: "prediction", title: "Driver Signals", description: "Temperature and holiday patterns together." },
+  ];
+  const currentSlide = slideFlow[currentSlideIndex] || null;
+  const currentSlideId = currentSlide?.id ?? null;
+  const showEvaluation = currentSlide ? currentSlide.phase === "evaluation" : false;
+  const currentPhaseSlides = currentSlide
+    ? slideFlow.filter((slide) => slide.phase === currentSlide.phase)
+    : [];
+  const currentPhasePosition = currentSlide
+    ? currentPhaseSlides.findIndex((slide) => slide.id === currentSlide.id) + 1
+    : 0;
+  const overallProgressPct = slideFlow.length === 0 ? 0 : Math.round(((currentSlideIndex + 1) / slideFlow.length) * 100);
+  const atFirstSlide = currentSlideIndex <= 0;
+  const atLastSlide = slideFlow.length === 0 || currentSlideIndex >= slideFlow.length - 1;
 
   return (
     <div className="space-y-8">
@@ -549,24 +578,28 @@ export default function Step4Analysis() {
           <div>
             <h3 className="text-lg font-semibold text-white">Analysis & Results</h3>
             <p className="text-sm text-slate-400 mt-1">
-              Follow this in order: first check model quality, then review future forecasts.
+              Slideshow mode: review one result at a time using Next and Previous.
             </p>
             <div className="flex flex-wrap items-center gap-2 mt-3">
               <Badge variant={loadError ? "warning" : "success"}>
                 {loadError ? "Partial data loaded" : "Data loaded"}
               </Badge>
               <Badge variant="default">Guided flow</Badge>
+              <Badge variant="default">
+                {slideFlow.length === 0 ? "0 slides" : `Slide ${currentSlideIndex + 1} of ${slideFlow.length}`}
+              </Badge>
             </div>
           </div>
 
           <div className="rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-3 min-w-[250px]">
-            <p className="text-xs font-semibold text-slate-300">Flow</p>
-            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-              <span className="text-slate-200 font-semibold">1.</span> Check model quality
-            </p>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              <span className="text-slate-200 font-semibold">2.</span> Review future forecast
-            </p>
+            <p className="text-xs font-semibold text-slate-300">Overall progress</p>
+            <div className="mt-2 h-2 w-full rounded-full bg-slate-800">
+              <div
+                className="h-2 rounded-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all duration-300"
+                style={{ width: `${overallProgressPct}%` }}
+              />
+            </div>
+            <p className="text-xs text-slate-400 mt-2">{overallProgressPct}% complete</p>
           </div>
         </div>
 
@@ -592,63 +625,73 @@ export default function Step4Analysis() {
 
       {!loading && analysis && (
         <div className="space-y-6">
-          {showEvaluation && (
-            <div className="rounded-2xl border border-sky-800/60 bg-sky-950/20 px-4 py-3">
-              <p className="text-sm font-semibold text-sky-300">Phase 1: Check Model Quality</p>
-              <p className="text-xs text-sky-200/80 mt-1">
-                These charts show how well the model performed on the held-out test period.
+          {currentSlide && (
+            <div
+              className={`rounded-2xl px-4 py-3 ${
+                showEvaluation
+                  ? "border border-sky-800/60 bg-sky-950/20"
+                  : "border border-emerald-800/60 bg-emerald-950/20"
+              }`}
+            >
+              <p className={`text-sm font-semibold ${showEvaluation ? "text-sky-300" : "text-emerald-300"}`}>
+                {showEvaluation ? "Phase 1: Check Model Quality" : "Phase 2: Review Future Forecast"}
+              </p>
+              <p className={`text-xs mt-1 ${showEvaluation ? "text-sky-200/80" : "text-emerald-200/80"}`}>
+                {showEvaluation
+                  ? "Use these slides to confirm accuracy on held-out test data."
+                  : "Use these slides to inspect forward forecasts and driver behavior."}
+              </p>
+              <p className={`text-xs mt-1 ${showEvaluation ? "text-sky-200/70" : "text-emerald-200/70"}`}>
+                Step {currentPhasePosition} of {currentPhaseSlides.length} in this phase
               </p>
             </div>
           )}
 
-          {selectedSections.includes("summary") && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Run Summary</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
-                  <InfoCard
-                    label="Target"
-                    value={targetLabel}
-                    help={`This is the thing we are trying to predict each ${periodNoun}.`}
-                  />
-                  <InfoCard
-                    label="Date range"
-                    value={`${startLabel} to ${endLabel}`}
-                    help="This is the period used for training and evaluation."
-                  />
-                  <InfoCard
-                    label="Rows and freq"
-                    value={`${rowsLabel} rows, ${freqLabel}`}
-                    help={`Rows are ${periodNoun}-level points. More rows generally means more stable training.`}
-                  />
-                  <InfoCard
-                    label="Models"
-                    value={`${baselineModelLabel} + ${multivariateModelLabel}`}
-                    help="Baseline is the simpler reference model. Multivariate uses extra driver signals."
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {selectedSections.includes("metrics") && (
+          {currentSlideId === "summary-metrics" && (
             <div className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Run Summary</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+                    <InfoCard
+                      label="Target"
+                      value={analysis.manifest.data_summary.target_name}
+                      help="This is the thing we are trying to predict each week."
+                    />
+                    <InfoCard
+                      label="Date range"
+                      value={`${analysis.manifest.data_summary.start} to ${analysis.manifest.data_summary.end}`}
+                      help="This is the period used for training and evaluation."
+                    />
+                    <InfoCard
+                      label="Rows and freq"
+                      value={`${analysis.manifest.data_summary.rows} rows, ${analysis.manifest.data_summary.freq}`}
+                      help="Rows are weekly points. More rows generally means more stable training."
+                    />
+                    <InfoCard
+                      label="Models"
+                      value={`${String(analysis.manifest.settings.baseline_model)} + ${String(
+                        analysis.manifest.settings.multi_model
+                      )}`}
+                      help="Baseline is the simpler reference model. Multivariate uses extra driver signals."
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <KpiCard
                   title="Baseline RMSE"
                   value={Number.isFinite(baselineRmse) ? fmt.format(baselineRmse) : "N/A"}
                   tone="neutral"
-                  status="reference"
-                  explanation="Average prediction error size for the baseline model. Lower is better."
+                  explanation="RMSE is the typical prediction miss size. Lower means the model is closer to the real value."
                 />
                 <KpiCard
                   title="Multivariate RMSE"
                   value={Number.isFinite(multivariateRmse) ? fmt.format(multivariateRmse) : "N/A"}
-                  tone={hasImprovement ? (improved ? "success" : "danger") : "neutral"}
-                  status={hasImprovement ? (improved ? "improved" : "worse") : "reference"}
-                  explanation="Average prediction error size for the advanced model. Lower is better."
+                  tone="success"
+                  explanation="Same metric for the multivariate model. Lower than baseline means better accuracy."
                 />
                 <KpiCard
                   title="Multivariate NRMSE"
@@ -672,27 +715,30 @@ export default function Step4Analysis() {
                 <KpiCard
                   title="Improvement"
                   value={Number.isFinite(improvementPct) ? `${pct.format(improvementPct)}%` : "N/A"}
-                  tone={hasImprovement ? (improved ? "success" : "danger") : "neutral"}
-                  status={hasImprovement ? (improved ? "improved" : "worse") : "reference"}
-                  explanation="How much the multivariate model reduced RMSE compared with baseline."
+                  tone="success"
+                  explanation="Percent drop in RMSE versus baseline. Positive means the multivariate model improved."
                 />
               </div>
               <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3">
                 <p className="text-xs font-semibold text-slate-300">Simple reading guide</p>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  Lower RMSE means the model is usually closer to the real observed value. A positive improvement means
-                  the multivariate model performed better than baseline on the test period.
+                  Example: if RMSE is 100, predictions are usually about 100 units away from the real value.
+                  A positive improvement number means the multivariate model reduced that typical error.
                 </p>
               </div>
             </div>
           )}
 
-          {selectedSections.includes("test-fit") && (
+          {currentSlideId === "test-fit" && (
             <Card>
               <CardHeader>
                 <CardTitle>Test Window Fit</CardTitle>
               </CardHeader>
               <CardContent>
+                <p className="text-sm text-slate-300 mb-3">
+                  This chart shows how closely each model followed the real values in the test period.
+                  The closer the lines are to the actual curve, the more reliable the model is.
+                </p>
                 <p className="text-xs text-slate-500 mb-1">
                   X-axis: full timeline, with the final test period highlighted.
                 </p>
@@ -761,12 +807,15 @@ export default function Step4Analysis() {
             </Card>
           )}
 
-          {selectedSections.includes("error-trend") && (
+          {currentSlideId === "error-trend" && (
             <Card>
               <CardHeader>
                 <CardTitle>Absolute Error Trend</CardTitle>
               </CardHeader>
               <CardContent>
+                <p className="text-sm text-slate-300 mb-3">
+                  This chart focuses only on error size over time. It helps you see if model accuracy is stable or drifting.
+                </p>
                 <p className="text-xs text-slate-500 mb-3">
                   Y-axis: prediction error size (lower is better).
                 </p>
@@ -803,12 +852,15 @@ export default function Step4Analysis() {
             </Card>
           )}
 
-          {selectedSections.includes("feature-importance") && (
+          {currentSlideId === "feature-importance" && (
             <Card>
               <CardHeader>
                 <CardTitle>Feature Importance</CardTitle>
               </CardHeader>
               <CardContent>
+                <p className="text-sm text-slate-300 mb-3">
+                  These bars rank which features influenced the multivariate model the most during training.
+                </p>
                 <p className="text-xs text-slate-500 mb-3">
                   This shows which input features influenced the multivariate model most.
                 </p>
@@ -829,21 +881,15 @@ export default function Step4Analysis() {
             </Card>
           )}
 
-          {showPrediction && (
-            <div className="rounded-2xl border border-emerald-800/60 bg-emerald-950/20 px-4 py-3">
-              <p className="text-sm font-semibold text-emerald-300">Phase 2: Review Future Forecast</p>
-              <p className="text-xs text-emerald-200/80 mt-1">
-                These charts show what the model predicts for upcoming periods.
-              </p>
-            </div>
-          )}
-
-          {selectedSections.includes("future-forecast") && (
+          {currentSlideId === "future-forecast" && (
             <Card>
               <CardHeader>
                 <CardTitle>Future Forecast</CardTitle>
               </CardHeader>
               <CardContent>
+                <p className="text-sm text-slate-300 mb-3">
+                  This view joins history and forecast in one timeline, so you can clearly see where prediction starts and how each model continues.
+                </p>
                 <p className="text-xs text-slate-500 mb-1">
                   X-axis: full timeline, including historical data and future forecast periods.
                 </p>
@@ -950,20 +996,23 @@ export default function Step4Analysis() {
             </Card>
           )}
 
-          {selectedSections.includes("driver-series") && (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Driver Signal: Temperature</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-xs text-slate-500 mb-3">
-                    Y-axis: average temperature per period.
-                  </p>
-                  {driverData.length === 0 ? (
-                    <EmptyState text="No temperature driver data found." />
-                  ) : (
-                    <div className="space-y-3">
+          {currentSlideId === "driver-series" && (
+            <div className="space-y-3">
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3">
+                <p className="text-sm text-slate-300">
+                  These two driver charts sit side by side so you can compare weekly temperature and holiday patterns in one place.
+                </p>
+              </div>
+              {driverData.length === 0 ? (
+                <EmptyState text="No driver data found." />
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Driver Signal: Temperature</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-xs text-slate-500 mb-3">Y-axis: weekly average temperature.</p>
                       <ChartWrap>
                         <LineChart data={driverVisibleRows}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
@@ -992,32 +1041,25 @@ export default function Step4Analysis() {
                           <Line type="monotone" dataKey="temp_mean" stroke="#22d3ee" dot={false} />
                         </LineChart>
                       </ChartWrap>
-                      <TimelineControls
-                        title="View Window"
-                        timestamps={driverData.map((r) => r.ts)}
-                        range={driverRange}
-                        onRangeChange={setDriverRange}
-                      />
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                    </CardContent>
+                  </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Driver Signal: Holidays</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-xs text-slate-500 mb-3">
-                    Y-axis: number of holidays per period.
-                  </p>
-                  {driverData.length === 0 ? (
-                    <EmptyState text="No holiday driver data found." />
-                  ) : (
-                    <div className="space-y-3">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Driver Signal: Holidays</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-xs text-slate-500 mb-3">Y-axis: number of holidays each week.</p>
                       <ChartWrap>
                         <BarChart data={driverVisibleRows}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                          <defs>
+                            <linearGradient id="holidayBarGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#fbbf24" stopOpacity={0.98} />
+                              <stop offset="60%" stopColor="#f59e0b" stopOpacity={0.9} />
+                              <stop offset="100%" stopColor="#b45309" stopOpacity={0.82} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="2 4" stroke="#334155" />
                           <XAxis
                             dataKey="ts"
                             type="number"
@@ -1034,56 +1076,35 @@ export default function Step4Analysis() {
                           <Tooltip
                             labelFormatter={(label) => formatLongDateFromTs(Number(label))}
                             formatter={tooltipValue}
+                            cursor={{ fill: "rgba(148, 163, 184, 0.08)" }}
+                            contentStyle={{
+                              backgroundColor: "#0f172a",
+                              border: "1px solid #334155",
+                              borderRadius: "10px",
+                            }}
                           />
                           <Legend />
-                          <Bar dataKey="holiday_count" name="holiday count" fill="#f59e0b" radius={[2, 2, 0, 0]} />
+                          <Bar
+                            dataKey="holiday_count"
+                            name="holiday count"
+                            fill="url(#holidayBarGradient)"
+                            radius={[7, 7, 0, 0]}
+                            barSize={16}
+                            maxBarSize={24}
+                          />
                         </BarChart>
                       </ChartWrap>
-                      <TimelineControls
-                        title="View Window"
-                        timestamps={driverData.map((r) => r.ts)}
-                        range={driverRange}
-                        onRangeChange={setDriverRange}
-                      />
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+              <TimelineControls
+                title="View Window"
+                timestamps={driverData.map((r) => r.ts)}
+                range={driverRange}
+                onRangeChange={setDriverRange}
+              />
             </div>
-          )}
-
-          {selectedSections.includes("forecast-table") && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Forecast Table</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {forecastTableRows.length === 0 ? (
-                  <EmptyState text="No rows to display." />
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-slate-400 border-b border-slate-700">
-                          <th className="py-2">Week Ending</th>
-                          <th className="py-2">Baseline</th>
-                          <th className="py-2">Multivariate</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {forecastTableRows.map((row) => (
-                          <tr key={row.week_ending} className="border-b border-slate-800/70">
-                            <td className="py-2 text-slate-300">{formatDateString(row.week_ending)}</td>
-                            <td className="py-2 text-slate-300">{fmt.format(row.baseline_forecast)}</td>
-                            <td className="py-2 text-slate-200">{fmt.format(row.multivariate_forecast)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
           )}
 
         </div>
@@ -1095,19 +1116,39 @@ export default function Step4Analysis() {
         </div>
       )}
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <Button variant="secondary" onClick={prevStep} size="lg">
-          {"Back to Training"}
+          Back to Training
         </Button>
-        <Button onClick={handleContinue} size="lg">
-          {"Continue to Publish Story"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="lg"
+            onClick={() => setCurrentSlideIndex((prev) => Math.max(0, prev - 1))}
+            disabled={loading || !analysis || atFirstSlide}
+          >
+            Previous Slide
+          </Button>
+          {!atLastSlide ? (
+            <Button
+              size="lg"
+              onClick={() => setCurrentSlideIndex((prev) => Math.min(slideFlow.length - 1, prev + 1))}
+              disabled={loading || !analysis}
+            >
+              Next Slide
+            </Button>
+          ) : (
+            <Button onClick={handleContinue} size="lg" disabled={loading || !analysis}>
+              Continue to Publish Story
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function ChartWrap({ children, height = 320 }: { children: React.ReactNode; height?: number }) {
+function ChartWrap({ children, height = 420 }: { children: React.ReactNode; height?: number }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
       {children as React.ReactElement}

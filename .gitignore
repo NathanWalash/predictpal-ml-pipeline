@@ -230,3 +230,5 @@ Thumbs.db
 *.swo
 *~
 .vscode/settings.json
+
+/outputs
