@@ -29,6 +29,34 @@ function parseTs(value: string) {
   const ts = Date.parse(value);
   return Number.isFinite(ts) ? ts : null;
 }
+function getDateString(row: LooseRecord): string | null {
+  const candidate = row.week_ending ?? row.date ?? row.index ?? row.period;
+  return typeof candidate === "string" && candidate.trim() ? candidate : null;
+}
+function getPrimaryNumericValue(row: LooseRecord): number | null {
+  for (const [key, raw] of Object.entries(row)) {
+    if (key === "week_ending" || key === "date" || key === "index") continue;
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+function getStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((v) => (v == null ? "" : String(v).trim())).filter((v) => v.length > 0)
+    : [];
+}
+function prettifyDriverLabel(key: string) {
+  return key.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function shouldUseBarForDriver(rows: Array<Record<string, unknown>>, key: string) {
+  const values = rows.map((r) => Number(r[key])).filter((n) => Number.isFinite(n));
+  if (values.length === 0) return false;
+  const allIntegers = values.every((n) => Number.isInteger(n));
+  const max = Math.max(...values);
+  const unique = new Set(values).size;
+  return allIntegers && max <= 20 && unique <= 10;
+}
 
 function fmtDate(ts: number) {
   const d = new Date(ts);
@@ -291,19 +319,143 @@ export function StoryNotebook({ story }: { story: StoryDetail }) {
   );
 
   const driverData = useMemo(() => {
-    const holidayMap = new Map<number, number>();
-    for (const row of analysis?.datasets.holiday_weekly || []) {
-      const date = (row.week_ending ?? row.index ?? row.date) as string | undefined;
-      const ts = date ? parseTs(date) : null;
-      if (ts !== null) holidayMap.set(ts, Number(row.holiday_count) || 0);
+    type DriverRow = { ts: number; week_ending: string } & Record<string, number | string | null>;
+    const merged = new Map<number, DriverRow>();
+    const settings = analysis?.manifest?.settings || {};
+    const preferredDriverKeys = Array.from(
+      new Set([
+        ...getStringArray(settings["selected_drivers"]),
+        ...getStringArray(settings["driver_columns_used"]),
+      ])
+    );
+
+    const genericSeries = analysis?.datasets.driver_series || [];
+    if (genericSeries.length > 0) {
+      for (const row of genericSeries) {
+        const asRecord = row as LooseRecord;
+        const date = getDateString(asRecord);
+        if (!date) continue;
+        const ts = parseTs(date);
+        if (ts === null) continue;
+
+        const existing = merged.get(ts) || { ts, week_ending: date };
+        const next: DriverRow = { ...existing, ts, week_ending: existing.week_ending || date };
+        for (const [key, raw] of Object.entries(asRecord)) {
+          if (key === "week_ending" || key === "date" || key === "index") continue;
+          const n = Number(raw);
+          next[key] = Number.isFinite(n) ? n : null;
+        }
+        merged.set(ts, next);
+      }
+
+      return Array.from(merged.values()).sort((a, b) => a.ts - b.ts);
     }
 
-    return (analysis?.datasets.temp_weekly || [])
-      .map((r) => ({ ts: parseTs(r.date), temp_mean: Number(r.temp_mean), holiday_count: 0 }))
-      .filter((x): x is { ts: number; temp_mean: number; holiday_count: number } => x.ts !== null)
-      .map((x) => ({ ...x, holiday_count: holidayMap.get(x.ts) || 0 }))
-      .sort((a, b) => a.ts - b.ts);
+    const featureRows = analysis?.datasets.feature_frame || [];
+    if (featureRows.length > 0) {
+      const candidateKeys = new Set<string>();
+      if (preferredDriverKeys.length > 0) {
+        for (const key of preferredDriverKeys) candidateKeys.add(key);
+      } else {
+        const sample = featureRows[0] as LooseRecord;
+        for (const key of Object.keys(sample)) {
+          if (["week_ending", "date", "index", "period", "y"].includes(key)) continue;
+          if (key.startsWith("target_lag_") || key.endsWith("_lag_1") || key.endsWith("_lag_2")) continue;
+          candidateKeys.add(key);
+        }
+      }
+
+      for (const row of featureRows) {
+        const asRecord = row as LooseRecord;
+        const date = getDateString(asRecord);
+        if (!date) continue;
+        const ts = parseTs(date);
+        if (ts === null) continue;
+
+        const existing = merged.get(ts) || { ts, week_ending: date };
+        const next: DriverRow = { ...existing, ts, week_ending: existing.week_ending || date };
+        let assigned = false;
+        for (const key of candidateKeys) {
+          if (!(key in asRecord)) continue;
+          const n = Number(asRecord[key]);
+          if (Number.isFinite(n)) {
+            next[key] = n;
+            assigned = true;
+          }
+        }
+        if (assigned) merged.set(ts, next);
+      }
+
+      if (merged.size > 0) {
+        return Array.from(merged.values()).sort((a, b) => a.ts - b.ts);
+      }
+    }
+
+    for (const row of analysis?.datasets.temp_weekly || []) {
+      const asRecord = row as LooseRecord;
+      const date = getDateString(asRecord);
+      if (!date) continue;
+      const ts = parseTs(date);
+      if (ts === null) continue;
+
+      const tempRaw =
+        asRecord.temp_mean ??
+        asRecord.value ??
+        asRecord.temp ??
+        getPrimaryNumericValue(asRecord);
+      const temp = Number(tempRaw);
+      const existing = merged.get(ts) || { ts, week_ending: date };
+      merged.set(ts, {
+        ...existing,
+        ts,
+        week_ending: existing.week_ending || date,
+        temp_mean: Number.isFinite(temp) ? temp : null,
+      });
+    }
+
+    for (const row of analysis?.datasets.holiday_weekly || []) {
+      const asRecord = row as LooseRecord;
+      const date = getDateString(asRecord);
+      if (!date) continue;
+      const ts = parseTs(date);
+      if (ts === null) continue;
+
+      const countRaw = asRecord.holiday_count ?? asRecord.value ?? getPrimaryNumericValue(asRecord);
+      const count = Number(countRaw);
+      const existing = merged.get(ts) || { ts, week_ending: date };
+      merged.set(ts, {
+        ...existing,
+        ts,
+        week_ending: existing.week_ending || date,
+        holiday_count: Number.isFinite(count) ? count : null,
+      });
+    }
+
+    return Array.from(merged.values()).sort((a, b) => a.ts - b.ts);
   }, [analysis]);
+
+  const driverSeriesKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const row of driverData as Array<Record<string, unknown>>) {
+      for (const key of Object.keys(row)) {
+        if (key === "ts" || key === "week_ending") continue;
+        keys.add(key);
+      }
+    }
+    const settings = analysis?.manifest?.settings || {};
+    const preferred = [
+      ...getStringArray(settings["selected_drivers"]),
+      ...getStringArray(settings["driver_columns_used"]),
+    ];
+    const ordered: string[] = [];
+    for (const key of preferred) {
+      if (keys.has(key) && !ordered.includes(key)) ordered.push(key);
+    }
+    for (const key of keys) {
+      if (!ordered.includes(key)) ordered.push(key);
+    }
+    return ordered;
+  }, [analysis, driverData]);
 
   const importanceData = useMemo(
     () =>
@@ -474,38 +626,50 @@ export function StoryNotebook({ story }: { story: StoryDetail }) {
 
     if (block.assetId === "driver-series") {
       const rows = filterWindow(driverData, block.windowStartTs, block.windowEndTs);
-      const tempDomain = computeDomain(rows, ["temp_mean"]);
-      const holidayDomain = computeDomain(rows, ["holiday_count"], true);
+      if (rows.length === 0 || driverSeriesKeys.length === 0) {
+        return (
+          <div className="rounded-xl border border-slate-700 bg-slate-900/30 p-3 text-xs text-slate-400">
+            No driver data available for this chart.
+          </div>
+        );
+      }
 
       return (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <div className="rounded-xl border border-slate-700 bg-slate-900/30 p-3">
-            <p className="text-xs text-slate-400 mb-2">Temperature</p>
-            <ChartWrap height={260}>
-              <LineChart data={rows}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis {...sharedXAxisProps} />
-                <YAxis domain={tempDomain} tickFormatter={(v) => formatDecimal(Number(v), 1)} tick={{ fontSize: 11 }} />
-                <Tooltip labelFormatter={(label) => fmtLongDate(Number(label))} formatter={tooltipValue} />
-                <Legend />
-                <Line type="monotone" dataKey="temp_mean" name="temperature mean" stroke="#22d3ee" dot={false} />
-              </LineChart>
-            </ChartWrap>
-          </div>
-
-          <div className="rounded-xl border border-slate-700 bg-slate-900/30 p-3">
-            <p className="text-xs text-slate-400 mb-2">Holidays</p>
-            <ChartWrap height={260}>
-              <BarChart data={rows}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis {...sharedXAxisProps} />
-                <YAxis domain={holidayDomain} tickFormatter={axisNum} tick={{ fontSize: 11 }} />
-                <Tooltip labelFormatter={(label) => fmtLongDate(Number(label))} formatter={tooltipValue} />
-                <Legend />
-                <Bar dataKey="holiday_count" name="holiday count" fill="#f59e0b" radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ChartWrap>
-          </div>
+          {driverSeriesKeys.map((key) => {
+            const isBar = shouldUseBarForDriver(rows as Array<Record<string, unknown>>, key);
+            const domain = computeDomain(rows as Array<Record<string, unknown>>, [key], isBar);
+            return (
+              <div key={key} className="rounded-xl border border-slate-700 bg-slate-900/30 p-3">
+                <p className="text-xs text-slate-400 mb-2">{prettifyDriverLabel(key)}</p>
+                <ChartWrap height={260}>
+                  {isBar ? (
+                    <BarChart data={rows}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                      <XAxis {...sharedXAxisProps} />
+                      <YAxis domain={domain} tickFormatter={axisNum} tick={{ fontSize: 11 }} />
+                      <Tooltip labelFormatter={(label) => fmtLongDate(Number(label))} formatter={tooltipValue} />
+                      <Legend />
+                      <Bar dataKey={key} name={prettifyDriverLabel(key)} fill="#f59e0b" radius={[2, 2, 0, 0]} />
+                    </BarChart>
+                  ) : (
+                    <LineChart data={rows}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                      <XAxis {...sharedXAxisProps} />
+                      <YAxis
+                        domain={domain}
+                        tickFormatter={(v) => formatDecimal(Number(v), 2)}
+                        tick={{ fontSize: 11 }}
+                      />
+                      <Tooltip labelFormatter={(label) => fmtLongDate(Number(label))} formatter={tooltipValue} />
+                      <Legend />
+                      <Line type="monotone" dataKey={key} name={prettifyDriverLabel(key)} stroke="#22d3ee" dot={false} />
+                    </LineChart>
+                  )}
+                </ChartWrap>
+              </div>
+            );
+          })}
         </div>
       );
     }

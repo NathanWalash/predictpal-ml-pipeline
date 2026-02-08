@@ -9,6 +9,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+from pandas.tseries.frequencies import to_offset
 
 from app.core.evaluation import evaluate_split
 from app.core.features import (
@@ -31,6 +32,62 @@ def parse_lag_config(value: str) -> list[int]:
     return lags
 
 
+def _normalize_train_frequency(freq: str | None) -> str:
+    if not freq:
+        return "W-SUN"
+
+    upper = freq.upper()
+    mapping = {
+        "D": "D",
+        "W": "W-SUN",
+        "W-SUN": "W-SUN",
+        "MS": "MS",
+        "M": "MS",
+        "QS": "QS",
+        "Q": "QS",
+        "YS": "YS",
+        "Y": "YS",
+    }
+    return mapping.get(upper, upper)
+
+
+def _infer_train_frequency(index: pd.DatetimeIndex) -> str:
+    inferred = pd.infer_freq(index)
+    if inferred:
+        return _normalize_train_frequency(inferred)
+
+    if len(index) < 2:
+        return "W-SUN"
+
+    median_gap = index.to_series().diff().dropna().median()
+    if pd.isna(median_gap):
+        return "W-SUN"
+    if median_gap <= pd.Timedelta(days=2):
+        return "D"
+    if median_gap <= pd.Timedelta(days=10):
+        return "W-SUN"
+    if median_gap <= pd.Timedelta(days=40):
+        return "MS"
+    if median_gap <= pd.Timedelta(days=100):
+        return "QS"
+    return "YS"
+
+
+def _default_seasonal_period(freq: str) -> int:
+    upper = freq.upper()
+    if upper.startswith("M"):
+        return 12
+    if upper.startswith("W"):
+        return 52
+    if upper.startswith("D"):
+        return 7
+    if upper.startswith("Q"):
+        return 4
+    if upper.startswith("Y"):
+        return 1
+    return 52
+
+
 def prepare_series_and_drivers(
     df: pd.DataFrame,
     date_col: str,
@@ -38,16 +95,15 @@ def prepare_series_and_drivers(
     drivers: list[str],
     calendar_features: bool,
     holiday_features: bool,
-) -> tuple[pd.Series, pd.DataFrame | None, pd.DataFrame | None, list[str]]:
+    frequency: str | None = None,
+) -> tuple[pd.Series, pd.DataFrame | None, pd.DataFrame | None, list[str], str]:
     df = df.copy()
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
     df = df.dropna(subset=[date_col]).sort_values(date_col).reset_index(drop=True)
     df = df.set_index(date_col)
 
-    freq = pd.infer_freq(df.index)
-    if freq is None:
-        freq = "W"
-    df = df.asfreq(freq)
+    resolved_freq = _normalize_train_frequency(frequency) if frequency else _infer_train_frequency(df.index)
+    df = df.asfreq(resolved_freq)
 
     if target_col not in df.columns:
         raise ValueError(f"Target column not found: {target_col}")
@@ -74,7 +130,7 @@ def prepare_series_and_drivers(
     if calendar_features:
         calendar_df = build_calendar_features(target_series.index)
 
-    return target_series, drivers_df, calendar_df, selected_driver_cols
+    return target_series, drivers_df, calendar_df, selected_driver_cols, resolved_freq
 
 
 def select_lags(
@@ -127,13 +183,15 @@ def forecast_future(
     ridge_alpha: float,
     seasonal_period: int,
     multi_model: str,
+    freq: str,
     gbm_params: Optional[dict] = None,
 ) -> pd.DataFrame:
     last_date = target_series.index.max()
+    offset = to_offset(freq)
     future_index = pd.date_range(
-        start=last_date + pd.Timedelta(days=7),
+        start=last_date + offset,
         periods=horizon,
-        freq="W",
+        freq=freq,
     )
 
     future_drivers = build_future_drivers(drivers_df, calendar_df, future_index)
@@ -229,9 +287,10 @@ def train_and_forecast(
     test_window_weeks: int,
     validation_mode: str,
     calendar_features: bool,
+    frequency: str | None = None,
     holiday_features: bool = False,
     ridge_alpha: float = 1.0,
-    seasonal_period: int = 52,
+    seasonal_period: int | None = None,
     gbm_params: Optional[dict] = None,
     output_dir: Optional[Path] = None,
     input_paths: Optional[list[Path]] = None,
@@ -239,17 +298,22 @@ def train_and_forecast(
     run_dir = output_dir or OUTPUTS_DIR
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    target_series, drivers_df, calendar_df, selected_driver_cols = prepare_series_and_drivers(
+    target_series, drivers_df, calendar_df, selected_driver_cols, resolved_freq = prepare_series_and_drivers(
         df,
         date_col,
         target_col,
         drivers,
         calendar_features,
         holiday_features,
+        frequency=frequency,
     )
 
     if len(target_series) < 20:
         raise ValueError("Need at least 20 data points to train a model")
+
+    resolved_seasonal_period = (
+        seasonal_period if seasonal_period is not None else _default_seasonal_period(resolved_freq)
+    )
 
     lags, lag_search = select_lags(
         target_series,
@@ -260,7 +324,7 @@ def train_and_forecast(
         test_window_weeks,
         baseline_model,
         ridge_alpha,
-        seasonal_period,
+        resolved_seasonal_period,
         multivariate_model,
         validation_mode=validation_mode,
     )
@@ -281,7 +345,7 @@ def train_and_forecast(
         gbm_params,
         baseline_model=baseline_model,
         ridge_alpha=ridge_alpha,
-        seasonal_period=seasonal_period,
+        seasonal_period=resolved_seasonal_period,
         multi_model=multivariate_model,
     )
 
@@ -294,8 +358,9 @@ def train_and_forecast(
         horizon,
         baseline_model,
         ridge_alpha,
-        seasonal_period,
+        resolved_seasonal_period,
         multivariate_model,
+        resolved_freq,
         gbm_params,
     )
 
@@ -331,6 +396,7 @@ def train_and_forecast(
     target_series_path = artifacts_dir / "target_series.csv"
     temp_weekly_path = artifacts_dir / "temp_weekly.csv"
     holiday_weekly_path = artifacts_dir / "holiday_weekly.csv"
+    driver_series_path = artifacts_dir / "driver_series.csv"
     analysis_path = run_dir / "analysis_result.json"
 
     forecast_df.to_csv(forecast_path, index=False)
@@ -361,12 +427,19 @@ def train_and_forecast(
             columns={date_col: "week_ending", "index": "week_ending"}
         ).to_csv(holiday_weekly_path, index=False)
 
+    if drivers_df is not None and not drivers_df.empty:
+        drivers_df.reset_index().rename(
+            columns={date_col: "week_ending", "index": "week_ending"}
+        ).to_csv(driver_series_path, index=False)
+
     metrics = {
         "baseline_rmse": eval_result["rmse_base"],
         "baseline_mae": eval_result["mae_base"],
+        "baseline_nrmse_pct": eval_result["nrmse_base_pct"],
         "baseline_walk_forward_rmse": eval_result["wf_rmse_base"],
         "multivariate_rmse": eval_result["rmse_multi"],
         "multivariate_mae": eval_result["mae_multi"],
+        "multivariate_nrmse_pct": eval_result["nrmse_multi_pct"],
         "multivariate_walk_forward_rmse": eval_result["wf_rmse_multi"],
         "improvement_pct": eval_result["improvement"],
     }
@@ -380,16 +453,20 @@ def train_and_forecast(
         "target_series_csv": "artifacts/target_series.csv",
         "temp_weekly_csv": "artifacts/temp_weekly.csv",
         "holiday_weekly_csv": "artifacts/holiday_weekly.csv",
+        "driver_series_csv": "artifacts/driver_series.csv",
         "analysis_json": "analysis_result.json",
     }
 
     settings = {
         "baseline_model": baseline_model,
         "multivariate_model": multivariate_model,
+        "selected_drivers": selected_driver_cols,
+        "driver_columns_used": list(drivers_df.columns) if drivers_df is not None else [],
         "lags": lags,
         "test_window_weeks": test_window_weeks,
         "validation_mode": validation_mode,
         "forecast_horizon": horizon,
+        "frequency": resolved_freq,
         "calendar_features": calendar_features,
         "auto_select_lags": auto_select_lags,
     }
@@ -405,7 +482,7 @@ def train_and_forecast(
             "start": target_series.index.min().strftime("%Y-%m-%d"),
             "end": target_series.index.max().strftime("%Y-%m-%d"),
             "rows": int(len(target_series)),
-            "freq": str(pd.infer_freq(target_series.index) or "W-SUN"),
+            "freq": resolved_freq,
         },
         "settings": settings,
         "metrics": metrics,

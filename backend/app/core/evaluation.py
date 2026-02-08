@@ -9,6 +9,13 @@ from app.core.metrics import rmse, mae, parse_test_size
 from app.core.models import build_gbm, build_xgb, build_ridge, seasonal_naive_pred
 
 
+def _nrmse_pct(y_true: np.ndarray, rmse_value: float) -> float:
+    denom = float(np.mean(np.abs(y_true)))
+    if denom <= 1e-12:
+        return 0.0
+    return float((rmse_value / denom) * 100.0)
+
+
 def walk_forward_rmse(
     frame: pd.DataFrame,
     baseline_features: list[str],
@@ -104,6 +111,8 @@ def evaluate_metrics(
 
     rmse_base = rmse(y_test, y_pred_base)
     rmse_multi = rmse(y_test, y_pred_multi)
+    nrmse_base_pct = _nrmse_pct(y_test, rmse_base)
+    nrmse_multi_pct = _nrmse_pct(y_test, rmse_multi)
     mae_base = mae(y_test, y_pred_base)
     mae_multi = mae(y_test, y_pred_multi)
     improvement = (rmse_base - rmse_multi) / rmse_base * 100
@@ -125,6 +134,8 @@ def evaluate_metrics(
         "test_len": test_len,
         "rmse_base": rmse_base,
         "rmse_multi": rmse_multi,
+        "nrmse_base_pct": nrmse_base_pct,
+        "nrmse_multi_pct": nrmse_multi_pct,
         "mae_base": mae_base,
         "mae_multi": mae_multi,
         "improvement": improvement,
@@ -182,6 +193,8 @@ def evaluate_split(
 
     rmse_base = rmse(y_test, y_pred_base)
     rmse_multi = rmse(y_test, y_pred_multi)
+    nrmse_base_pct = _nrmse_pct(y_test, rmse_base)
+    nrmse_multi_pct = _nrmse_pct(y_test, rmse_multi)
     mae_base = mae(y_test, y_pred_base)
     mae_multi = mae(y_test, y_pred_multi)
     improvement = (rmse_base - rmse_multi) / rmse_base * 100
@@ -210,6 +223,8 @@ def evaluate_split(
         "y_pred_multi": y_pred_multi,
         "rmse_base": rmse_base,
         "rmse_multi": rmse_multi,
+        "nrmse_base_pct": nrmse_base_pct,
+        "nrmse_multi_pct": nrmse_multi_pct,
         "mae_base": mae_base,
         "mae_multi": mae_multi,
         "improvement": improvement,

@@ -101,6 +101,7 @@ export async function processData(options: {
   dateCol: string;
   targetCol: string;
   frequency: string;
+  driverFrequency?: string;
   driverDateCol?: string;
   outlierStrategy: string;
   driverOutlierStrategy: string;
@@ -110,6 +111,7 @@ export async function processData(options: {
     date_col: options.dateCol,
     target_col: options.targetCol,
     frequency: options.frequency,
+    driver_frequency: options.driverFrequency,
     driver_date_col: options.driverDateCol,
     outlier_strategy: options.outlierStrategy,
     driver_outlier_strategy: options.driverOutlierStrategy,
@@ -134,6 +136,7 @@ export async function trainModel(
     validationMode: string;
     calendarFeatures: boolean;
     holidayFeatures: boolean;
+    frequency: string;
   }
 ) {
   const res = await api.post("/train", {
@@ -150,6 +153,7 @@ export async function trainModel(
     validation_mode: options.validationMode,
     calendar_features: options.calendarFeatures,
     holiday_features: options.holidayFeatures,
+    frequency: options.frequency,
   });
   return res.data;
 }
@@ -204,9 +208,11 @@ export interface AnalysisManifest {
   metrics: {
     baseline_rmse: number;
     baseline_mae: number;
+    baseline_nrmse_pct?: number;
     baseline_walk_forward_rmse: number;
     multivariate_rmse: number;
     multivariate_mae: number;
+    multivariate_nrmse_pct?: number;
     multivariate_walk_forward_rmse: number;
     improvement_pct: number;
   };
@@ -244,6 +250,7 @@ export interface AnalysisBundle {
       date?: string;
       holiday_count: number;
     }>;
+    driver_series: Array<Record<string, string | number | null>>;
   };
 }
 

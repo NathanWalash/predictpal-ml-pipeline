@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useBuildStore } from "@/lib/store";
+import { BubbleSelect, Toggle, Button, Slider } from "@/components/ui";
 import { trainModel, sendChatMessage } from "@/lib/api";
-import { BubbleSelect, Toggle, Button } from "@/components/ui";
 import {
   Play,
   CheckCircle2,
@@ -50,39 +50,6 @@ const MV_MODEL_OPTIONS = [
   },
 ];
 
-const LAG_CONFIG_OPTIONS = [
-  {
-    id: "1,2,4",
-    label: "Fast [1, 2, 4]",
-    icon: <TrendingUp className="w-4 h-4" />,
-    description: "Quick baseline with a few lags",
-  },
-  {
-    id: "auto",
-    label: "Auto-select",
-    icon: <Sparkles className="w-4 h-4" />,
-    description: "Pick from the preset lag grid",
-  },
-  {
-    id: "1,2,3,4",
-    label: "Dense Short [1, 2, 3, 4]",
-    icon: <BarChart3 className="w-4 h-4" />,
-    description: "Short-term dynamics",
-  },
-  {
-    id: "1,3,6",
-    label: "Sparser [1, 3, 6]",
-    icon: <Hash className="w-4 h-4" />,
-    description: "More spaced signals",
-  },
-];
-
-const TEST_WINDOW_OPTIONS = [
-  { id: "24", label: "24 weeks", icon: <Calendar className="w-4 h-4" /> },
-  { id: "36", label: "36 weeks", icon: <Calendar className="w-4 h-4" /> },
-  { id: "48", label: "48 weeks", icon: <Calendar className="w-4 h-4" /> },
-];
-
 const VALIDATION_OPTIONS = [
   {
     id: "walk_forward",
@@ -98,18 +65,14 @@ const VALIDATION_OPTIONS = [
   },
 ];
 
-const HORIZON_OPTIONS = [
-  { id: "4", label: "4 weeks", icon: <Calendar className="w-4 h-4" /> },
-  { id: "8", label: "8 weeks", icon: <Calendar className="w-4 h-4" /> },
-  { id: "12", label: "12 weeks", icon: <Calendar className="w-4 h-4" /> },
-];
-
 export default function Step3TrainForecast() {
   const {
     projectId,
     dateCol,
     detectedDateCol,
     targetCol,
+    frequency,
+    rowCount,
     driverFiles,
     driverNumericColumns,
     selectedDrivers,
@@ -147,6 +110,110 @@ export default function Step3TrainForecast() {
   const [errorMsg, setErrorMsg] = useState("");
   const [trainProgress, setTrainProgress] = useState(0);
   const [aiBusyKey, setAiBusyKey] = useState<string | null>(null);
+
+  const periodLabel = frequency === "MS" ? "months" : frequency === "D" ? "days" : "periods";
+  const monthlyMode = frequency === "MS";
+  const defaultAutoLagConfig = monthlyMode ? "1,2,3,6,12" : "1,2,4";
+  const lagConfigOptions = useMemo(
+    () =>
+      monthlyMode
+        ? [
+            {
+              id: "1,2,3,6,12",
+              label: "Monthly Core [1, 2, 3, 6, 12]",
+              icon: <TrendingUp className="w-4 h-4" />,
+              description: "Short + seasonal monthly lags",
+            },
+            {
+              id: "auto",
+              label: "Auto-select",
+              icon: <Sparkles className="w-4 h-4" />,
+              description: "Pick from monthly preset lag grid",
+            },
+            {
+              id: "1,2,3,4,6,12",
+              label: "Dense Monthly [1, 2, 3, 4, 6, 12]",
+              icon: <BarChart3 className="w-4 h-4" />,
+              description: "Adds richer short-term monthly dynamics",
+            },
+            {
+              id: "1,3,6,12,24",
+              label: "Long Seasonal [1, 3, 6, 12, 24]",
+              icon: <Hash className="w-4 h-4" />,
+              description: "Emphasizes annual and longer cycles",
+            },
+          ]
+        : [
+            {
+              id: "1,2,4",
+              label: "Fast [1, 2, 4]",
+              icon: <TrendingUp className="w-4 h-4" />,
+              description: "Quick baseline with a few lags",
+            },
+            {
+              id: "auto",
+              label: "Auto-select",
+              icon: <Sparkles className="w-4 h-4" />,
+              description: "Pick from the preset lag grid",
+            },
+            {
+              id: "1,2,3,4",
+              label: "Dense Short [1, 2, 3, 4]",
+              icon: <BarChart3 className="w-4 h-4" />,
+              description: "Short-term dynamics",
+            },
+            {
+              id: "1,3,6",
+              label: "Sparser [1, 3, 6]",
+              icon: <Hash className="w-4 h-4" />,
+              description: "More spaced signals",
+            },
+          ],
+    [monthlyMode]
+  );
+  const holdoutMin = useMemo(() => {
+    if (!rowCount || rowCount <= 1) return 6;
+    return Math.max(3, Math.min(12, Math.floor(rowCount * 0.1)));
+  }, [rowCount]);
+  const holdoutMax = useMemo(() => {
+    if (!rowCount || rowCount <= 1) return 48;
+    return Math.max(holdoutMin, Math.min(72, rowCount - 1, Math.floor(rowCount * 0.4)));
+  }, [rowCount, holdoutMin]);
+  const holdoutMarks = useMemo(
+    () =>
+      holdoutMax > holdoutMin
+        ? [holdoutMin, Math.round((holdoutMin + holdoutMax) / 2), holdoutMax]
+        : [holdoutMin],
+    [holdoutMax, holdoutMin]
+  );
+  const horizonMin = 1;
+  const horizonMax = useMemo(() => {
+    return 48;
+  }, []);
+  const horizonMarks = useMemo(
+    () => [horizonMin, Math.round((horizonMin + horizonMax) / 2), horizonMax],
+    [horizonMax]
+  );
+
+  useEffect(() => {
+    if (testWindowWeeks < holdoutMin) {
+      setTestWindowWeeks(holdoutMin);
+      return;
+    }
+    if (testWindowWeeks > holdoutMax) {
+      setTestWindowWeeks(holdoutMax);
+    }
+  }, [testWindowWeeks, holdoutMin, holdoutMax, setTestWindowWeeks]);
+
+  useEffect(() => {
+    if (horizon < horizonMin) {
+      setHorizon(horizonMin);
+      return;
+    }
+    if (horizon > horizonMax) {
+      setHorizon(horizonMax);
+    }
+  }, [horizon, horizonMin, horizonMax, setHorizon]);
 
   const getApiErrorMessage = (err: unknown) => {
     if (
@@ -190,6 +257,7 @@ export default function Step3TrainForecast() {
         validationMode,
         calendarFeatures,
         holidayFeatures,
+        frequency: frequency || "W",
       });
       setTrainProgress(100);
       setForecastResults(result);
@@ -409,7 +477,7 @@ export default function Step3TrainForecast() {
               askPredictPalForChoice({
                 key: "lag-config",
                 topic: "lag configuration",
-                options: LAG_CONFIG_OPTIONS.map((o) => ({ id: o.id, label: o.label })),
+                options: lagConfigOptions.map((o) => ({ id: o.id, label: o.label })),
                 currentValue: autoSelectLags ? "auto" : lagConfig,
                 applyRecommendation: (value) => {
                   if (value === "auto") {
@@ -434,12 +502,13 @@ export default function Step3TrainForecast() {
           </Button>
         </div>
         <BubbleSelect
-          options={LAG_CONFIG_OPTIONS}
+          label="Recommended ranges"
+          options={lagConfigOptions}
           selected={autoSelectLags ? "auto" : lagConfig}
           onSelect={(value) => {
             if (value === "auto") {
               setAutoSelectLags(true);
-              setLagConfig("1,2,4");
+              setLagConfig(defaultAutoLagConfig);
               return;
             }
             setAutoSelectLags(false);
@@ -511,14 +580,14 @@ export default function Step3TrainForecast() {
           Test Settings
         </h3>
 
-        <BubbleSelect
-          label="Holdout length"
-          options={TEST_WINDOW_OPTIONS}
-          selected={String(testWindowWeeks)}
-          onSelect={(value) => setTestWindowWeeks(Number(value))}
-          layout="grid"
-          columns={3}
-          fullWidth
+        <Slider
+          label={`Holdout length: ${testWindowWeeks} ${periodLabel}`}
+          value={testWindowWeeks}
+          onChange={setTestWindowWeeks}
+          min={holdoutMin}
+          max={holdoutMax}
+          step={1}
+          marks={holdoutMarks}
         />
 
         <div className="flex items-center justify-between gap-3">
@@ -560,14 +629,14 @@ export default function Step3TrainForecast() {
       </div>
 
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
-        <BubbleSelect
-          label="Forecast length"
-          options={HORIZON_OPTIONS}
-          selected={String(horizon)}
-          onSelect={(value) => setHorizon(Number(value))}
-          layout="grid"
-          columns={3}
-          fullWidth
+        <Slider
+          label={`Forecast length: ${horizon} ${periodLabel}`}
+          value={horizon}
+          onChange={setHorizon}
+          min={horizonMin}
+          max={horizonMax}
+          step={1}
+          marks={horizonMarks}
         />
       </div>
 

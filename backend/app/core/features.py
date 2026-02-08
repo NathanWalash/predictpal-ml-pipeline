@@ -32,7 +32,7 @@ def build_calendar_features(index: pd.DatetimeIndex) -> pd.DataFrame:
 
 
 def build_holiday_features(index: pd.DatetimeIndex) -> pd.DataFrame:
-    # Match the older pipeline semantics: count actual UK holidays per week.
+    # Count UK holidays per model period (weekly, monthly, etc.).
     daily = pd.date_range(start=index.min(), end=index.max(), freq="D")
 
     if pyholidays is not None:
@@ -66,9 +66,10 @@ def build_holiday_features(index: pd.DatetimeIndex) -> pd.DataFrame:
         holiday_daily = pd.Series(0, index=daily, name="holiday_count")
         holiday_daily.loc[holiday_days] = 1
 
-    weekly = holiday_daily.resample("W-SUN").sum()
-    weekly = weekly.reindex(index, fill_value=0).astype(int)
-    return weekly.to_frame()
+    freq = pd.infer_freq(index) or "W-SUN"
+    period_holidays = holiday_daily.resample(freq).sum()
+    period_holidays = period_holidays.reindex(index, fill_value=0).astype(int)
+    return period_holidays.to_frame()
 
 
 def build_driver_lagged_frame(drivers_df: pd.DataFrame, lags: list[int]) -> pd.DataFrame:

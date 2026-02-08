@@ -154,6 +154,8 @@ interface BuildState {
   setTargetCol: (col: string) => void;
   frequency: string;
   setFrequency: (f: string) => void;
+  driverFrequency: string;
+  setDriverFrequency: (f: string) => void;
   missingStrategy: string;
   setMissingStrategy: (s: string) => void;
   missingFillValue: string;
@@ -239,6 +241,7 @@ const buildInitial = {
   dateCol: null as string | null,
   targetCol: null as string | null,
   frequency: "",
+  driverFrequency: "",
   missingStrategy: "",
   missingFillValue: "",
   outlierStrategy: "",
@@ -363,6 +366,7 @@ export const useBuildStore = create<BuildState>()((set) => ({
   setDateCol: (col) => set({ dateCol: col }),
   setTargetCol: (col) => set({ targetCol: col }),
   setFrequency: (f) => set({ frequency: f }),
+  setDriverFrequency: (f) => set({ driverFrequency: f }),
   setMissingStrategy: (s) => set({ missingStrategy: s }),
   setMissingFillValue: (v) => set({ missingFillValue: v }),
   setOutlierStrategy: (s) => set({ outlierStrategy: s }),

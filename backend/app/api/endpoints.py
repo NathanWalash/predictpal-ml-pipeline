@@ -217,6 +217,7 @@ class TrainRequest(BaseModel):
     validation_mode: str = "walk_forward"
     calendar_features: bool = False
     holiday_features: bool = False
+    frequency: str = "W"
 
 
 class ProcessRequest(BaseModel):
@@ -224,6 +225,7 @@ class ProcessRequest(BaseModel):
     date_col: str
     target_col: str
     frequency: str = "W"
+    driver_frequency: str | None = None
     driver_date_col: str | None = None
     outlier_strategy: str = "cap"
     driver_outlier_strategy: str = "keep"
@@ -481,6 +483,7 @@ async def process_data(req: ProcessRequest):
     requested_date_col = req.date_col
     process_note: str | None = None
     resample_freq = _normalize_frequency(req.frequency)
+    driver_resample_freq = _normalize_frequency(req.driver_frequency) if req.driver_frequency else resample_freq
     try:
         cleaned_df, prep_report = clean_dataframe_for_training(
             raw_df,
@@ -577,7 +580,7 @@ async def process_data(req: ProcessRequest):
 
         driver_clean = driver_df[[requested_driver_date_col, *resolved_numeric_cols]].copy()
         driver_clean = driver_clean.set_index(requested_driver_date_col).sort_index()
-        driver_clean = driver_clean.resample(resample_freq).mean(numeric_only=True)
+        driver_clean = driver_clean.resample(driver_resample_freq).mean(numeric_only=True)
         driver_clean = driver_clean.dropna(how="all")
         driver_clean = driver_clean.reset_index().rename(
             columns={requested_driver_date_col: date_col}
@@ -641,6 +644,7 @@ async def process_data(req: ProcessRequest):
             "file_name": driver_file_results[0]["file_name"] if driver_file_results else None,
             "file_names": [item["file_name"] for item in driver_file_results],
             "numeric_columns": driver_numeric_cols,
+            "frequency": driver_resample_freq if driver_file_results else None,
             "files": driver_file_results,
         },
     }
@@ -671,6 +675,7 @@ async def get_analysis_sample():
     target_series_path = _resolve_analysis_path(outputs.get("target_series_csv", ""), "artifacts/target_series.csv")
     temp_weekly_path = _resolve_analysis_path(outputs.get("temp_weekly_csv", ""), "artifacts/temp_weekly.csv")
     holiday_weekly_path = _resolve_analysis_path(outputs.get("holiday_weekly_csv", ""), "artifacts/holiday_weekly.csv")
+    driver_series_path = _resolve_analysis_path(outputs.get("driver_series_csv", ""), "artifacts/driver_series.csv")
     plot_path = _resolve_analysis_path(outputs.get("plot", ""), "plots/model_fit.png")
 
     return {
@@ -684,6 +689,7 @@ async def get_analysis_sample():
             "target_series": target_series_path.exists(),
             "temp_weekly": temp_weekly_path.exists(),
             "holiday_weekly": holiday_weekly_path.exists(),
+            "driver_series": driver_series_path.exists(),
         },
         "datasets": {
             "forecast": _csv_records(forecast_path),
@@ -693,6 +699,7 @@ async def get_analysis_sample():
             "target_series": _csv_records(target_series_path),
             "temp_weekly": _csv_records(temp_weekly_path),
             "holiday_weekly": _csv_records(holiday_weekly_path),
+            "driver_series": _csv_records(driver_series_path),
         },
     }
 
@@ -753,14 +760,23 @@ async def train_model(req: TrainRequest):
 
         driver_date_col = _resolve_optional_df_column(driver_df, date_col)
         if available_driver_cols and driver_date_col:
+            train_freq = _normalize_frequency(req.frequency)
+            aligned_driver_df = driver_df[[driver_date_col, *available_driver_cols]].copy()
+            aligned_driver_df[driver_date_col] = pd.to_datetime(
+                aligned_driver_df[driver_date_col], errors="coerce"
+            )
+            aligned_driver_df = aligned_driver_df.dropna(subset=[driver_date_col])
+            aligned_driver_df = aligned_driver_df.set_index(driver_date_col).sort_index()
+            aligned_driver_df = aligned_driver_df.resample(train_freq).mean(numeric_only=True)
+            aligned_driver_df = aligned_driver_df.reset_index().rename(
+                columns={driver_date_col: date_col}
+            )
             df = df.merge(
-                driver_df[[driver_date_col, *available_driver_cols]],
+                aligned_driver_df[[date_col, *available_driver_cols]],
                 left_on=date_col,
-                right_on=driver_date_col,
+                right_on=date_col,
                 how="left",
             )
-            if driver_date_col != date_col and driver_date_col in df.columns:
-                df = df.drop(columns=[driver_date_col])
             selected_drivers = available_driver_cols
         else:
             selected_drivers = []
@@ -784,6 +800,7 @@ async def train_model(req: TrainRequest):
             validation_mode=req.validation_mode,
             calendar_features=req.calendar_features,
             holiday_features=req.holiday_features,
+            frequency=req.frequency,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Forecasting error: {e}")
