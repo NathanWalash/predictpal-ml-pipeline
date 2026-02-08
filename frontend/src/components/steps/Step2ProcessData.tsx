@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useBuildStore } from "@/lib/store";
-import { processData } from "@/lib/api";
+import { processData, sendChatMessage } from "@/lib/api";
 import { BubbleSelect, Button, Input } from "@/components/ui";
 import {
   Calendar,
@@ -13,6 +13,8 @@ import {
   BarChart3,
   X,
   CheckCircle2,
+  MessageSquare,
+  Loader2,
 } from "lucide-react";
 
 const FREQUENCY_OPTIONS = [
@@ -93,6 +95,7 @@ export default function Step2ProcessData() {
   const {
     columns,
     numericColumns,
+    rowCount,
     detectedDateCol,
     dateCol,
     setDateCol,
@@ -118,9 +121,12 @@ export default function Step2ProcessData() {
     setLoading,
     setLoadingMessage,
     driverFiles,
+    chatMessages,
+    addChatMessage,
   } = useBuildStore();
 
   const [processError, setProcessError] = useState("");
+  const [aiBusyKey, setAiBusyKey] = useState<string | null>(null);
 
   const getApiErrorMessage = (err: unknown) => {
     if (
@@ -225,6 +231,98 @@ export default function Step2ProcessData() {
     nextStep();
   };
 
+  const extractRecommendation = (content: string, validIds: string[]) => {
+    const match = content.match(/RECOMMENDATION\s*:\s*([A-Za-z0-9_.-]+)/i);
+    if (!match) return null;
+    const raw = match[1].replace(/[`"'.,;:!?]+$/g, "").trim();
+    const found = validIds.find((id) => id.toLowerCase() === raw.toLowerCase());
+    return found || null;
+  };
+
+  const sanitizeAssistantReply = (content: string) => {
+    const cleaned = content
+      .replace(/\n?\s*RECOMMENDATION\s*:\s*[A-Za-z0-9_.-]+\s*$/i, "")
+      .trim();
+    return cleaned || content;
+  };
+
+  const askPredictPalForChoice = async (args: {
+    key: string;
+    topic: string;
+    options: { id: string; label: string }[];
+    currentValue?: string;
+    applyRecommendation: (id: string) => void;
+  }) => {
+    if (aiBusyKey) return;
+    setAiBusyKey(args.key);
+
+    const optionsText = args.options
+      .map((opt) => `- ${opt.id}: ${opt.label}`)
+      .join("\n");
+
+    const internalPrompt = [
+      `Can you explain these ${args.topic} options and suggest the best one for my current dataset?`,
+      "",
+      "Use only one of these option IDs:",
+      optionsText,
+      "",
+      `Current selection: ${args.currentValue || "not selected"}`,
+      "",
+      "Reply with concise reasoning, then end with exactly:",
+      "RECOMMENDATION: <id>",
+    ].join("\n");
+
+    addChatMessage({
+      role: "user",
+      content: `Can you explain these ${args.topic} options and suggest the best one for my current dataset?`,
+    });
+
+    try {
+      const response = await sendChatMessage({
+        project_id: projectId || "demo",
+        message: internalPrompt,
+        page_context: [
+          "Page: Process Data (Step 2).",
+          dateCol || detectedDateCol
+            ? `Date column: ${dateCol || detectedDateCol}.`
+            : "Date column not selected.",
+          targetCol ? `Target column: ${targetCol}.` : "Target column not selected.",
+          rowCount > 0 ? `Rows: ${rowCount}.` : "",
+          numericColumns.length > 0
+            ? `Numeric columns: ${numericColumns.join(", ")}.`
+            : "",
+          `Frequency: ${frequency || "not selected"}.`,
+          `Missing strategy: ${missingStrategy || "not selected"}.`,
+          `Outlier strategy: ${normalizedOutlierStrategy || "not selected"}.`,
+          `Driver outlier strategy: ${normalizedDriverOutlierStrategy || "not selected"}.`,
+        ]
+          .filter(Boolean)
+          .join(" "),
+        history: chatMessages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
+      });
+
+      addChatMessage({
+        role: "assistant",
+        content: sanitizeAssistantReply(response.content),
+      });
+      const recommendation = extractRecommendation(
+        response.content,
+        args.options.map((o) => o.id)
+      );
+      if (recommendation) {
+        args.applyRecommendation(recommendation);
+      }
+    } catch {
+      addChatMessage({
+        role: "assistant",
+        content:
+          "I couldn't fetch a recommendation right now. Please try again in a few seconds.",
+      });
+    } finally {
+      setAiBusyKey(null);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="rounded-2xl border border-slate-800 bg-gradient-to-r from-slate-900/80 to-slate-800/40 p-5">
@@ -274,8 +372,35 @@ export default function Step2ProcessData() {
           Clean and Prepare Data
         </h3>
 
+        <div className="flex items-center justify-between gap-3">
+          <label className="text-sm font-medium text-slate-300">How often is your data?</label>
+          <Button
+            size="icon"
+            variant="secondary"
+            disabled={aiBusyKey !== null}
+            aria-label="Ask Predict Pal about frequency options"
+            title="Ask Predict Pal"
+            onClick={() =>
+              askPredictPalForChoice({
+                key: "frequency",
+                topic: "frequency",
+                options: FREQUENCY_OPTIONS.map((o) => ({ id: o.id, label: o.label })),
+                currentValue: frequency,
+                applyRecommendation: setFrequency,
+              })
+            }
+          >
+            {aiBusyKey === "frequency" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <span className="inline-flex items-center gap-0.5 leading-none">
+                <span className="text-[11px]">🤖</span>
+                <MessageSquare className="w-3 h-3" />
+              </span>
+            )}
+          </Button>
+        </div>
         <BubbleSelect
-          label="How often is your data?"
           options={FREQUENCY_OPTIONS}
           selected={frequency}
           onSelect={setFrequency}
@@ -284,8 +409,35 @@ export default function Step2ProcessData() {
           fullWidth
         />
 
+        <div className="flex items-center justify-between gap-3">
+          <label className="text-sm font-medium text-slate-300">How should we fill missing values?</label>
+          <Button
+            size="icon"
+            variant="secondary"
+            disabled={aiBusyKey !== null}
+            aria-label="Ask Predict Pal about missing value options"
+            title="Ask Predict Pal"
+            onClick={() =>
+              askPredictPalForChoice({
+                key: "missing",
+                topic: "missing value handling",
+                options: MISSING_STRATEGY_OPTIONS.map((o) => ({ id: o.id, label: o.label })),
+                currentValue: missingStrategy,
+                applyRecommendation: setMissingStrategy,
+              })
+            }
+          >
+            {aiBusyKey === "missing" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <span className="inline-flex items-center gap-0.5 leading-none">
+                <span className="text-[11px]">🤖</span>
+                <MessageSquare className="w-3 h-3" />
+              </span>
+            )}
+          </Button>
+        </div>
         <BubbleSelect
-          label="How should we fill missing values?"
           options={MISSING_STRATEGY_OPTIONS}
           selected={missingStrategy}
           onSelect={setMissingStrategy}
@@ -294,8 +446,35 @@ export default function Step2ProcessData() {
           fullWidth
         />
 
+        <div className="flex items-center justify-between gap-3">
+          <label className="text-sm font-medium text-slate-300">How should we handle outliers?</label>
+          <Button
+            size="icon"
+            variant="secondary"
+            disabled={aiBusyKey !== null}
+            aria-label="Ask Predict Pal about outlier options"
+            title="Ask Predict Pal"
+            onClick={() =>
+              askPredictPalForChoice({
+                key: "outlier",
+                topic: "target outlier handling",
+                options: OUTLIER_STRATEGY_OPTIONS.map((o) => ({ id: o.id, label: o.label })),
+                currentValue: normalizedOutlierStrategy,
+                applyRecommendation: setOutlierStrategy,
+              })
+            }
+          >
+            {aiBusyKey === "outlier" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <span className="inline-flex items-center gap-0.5 leading-none">
+                <span className="text-[11px]">🤖</span>
+                <MessageSquare className="w-3 h-3" />
+              </span>
+            )}
+          </Button>
+        </div>
         <BubbleSelect
-          label="How should we handle outliers?"
           options={OUTLIER_STRATEGY_OPTIONS}
           selected={normalizedOutlierStrategy || "keep"}
           onSelect={setOutlierStrategy}
@@ -304,8 +483,35 @@ export default function Step2ProcessData() {
           fullWidth
         />
 
+        <div className="flex items-center justify-between gap-3">
+          <label className="text-sm font-medium text-slate-300">How should we handle driver outliers?</label>
+          <Button
+            size="icon"
+            variant="secondary"
+            disabled={aiBusyKey !== null}
+            aria-label="Ask Predict Pal about driver outlier options"
+            title="Ask Predict Pal"
+            onClick={() =>
+              askPredictPalForChoice({
+                key: "driver-outlier",
+                topic: "driver outlier handling",
+                options: OUTLIER_STRATEGY_OPTIONS.map((o) => ({ id: o.id, label: o.label })),
+                currentValue: normalizedDriverOutlierStrategy,
+                applyRecommendation: setDriverOutlierStrategy,
+              })
+            }
+          >
+            {aiBusyKey === "driver-outlier" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <span className="inline-flex items-center gap-0.5 leading-none">
+                <span className="text-[11px]">🤖</span>
+                <MessageSquare className="w-3 h-3" />
+              </span>
+            )}
+          </Button>
+        </div>
         <BubbleSelect
-          label="How should we handle driver outliers?"
           options={OUTLIER_STRATEGY_OPTIONS}
           selected={normalizedDriverOutlierStrategy || "keep"}
           onSelect={setDriverOutlierStrategy}

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useBuildStore } from "@/lib/store";
-import { trainModel } from "@/lib/api";
+import { trainModel, sendChatMessage } from "@/lib/api";
 import { BubbleSelect, Toggle, Button } from "@/components/ui";
 import {
   Play,
@@ -17,6 +17,7 @@ import {
   Calendar,
   TrendingUp,
   Hash,
+  MessageSquare,
 } from "lucide-react";
 
 const BASELINE_OPTIONS = [
@@ -138,11 +139,14 @@ export default function Step3TrainForecast() {
     isLoading,
     setLoading,
     setLoadingMessage,
+    chatMessages,
+    addChatMessage,
   } = useBuildStore();
 
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [trainProgress, setTrainProgress] = useState(0);
+  const [aiBusyKey, setAiBusyKey] = useState<string | null>(null);
 
   const getApiErrorMessage = (err: unknown) => {
     if (
@@ -205,6 +209,92 @@ export default function Step3TrainForecast() {
     nextStep();
   };
 
+  const extractRecommendation = (content: string, validIds: string[]) => {
+    const match = content.match(/RECOMMENDATION\s*:\s*([A-Za-z0-9_.-]+)/i);
+    if (!match) return null;
+    const raw = match[1].replace(/[`"'.,;:!?]+$/g, "").trim();
+    const found = validIds.find((id) => id.toLowerCase() === raw.toLowerCase());
+    return found || null;
+  };
+
+  const sanitizeAssistantReply = (content: string) => {
+    const cleaned = content
+      .replace(/\n?\s*RECOMMENDATION\s*:\s*[A-Za-z0-9_.-]+\s*$/i, "")
+      .trim();
+    return cleaned || content;
+  };
+
+  const askPredictPalForChoice = async (args: {
+    key: string;
+    topic: string;
+    options: { id: string; label: string }[];
+    currentValue?: string;
+    applyRecommendation: (id: string) => void;
+  }) => {
+    if (aiBusyKey) return;
+    setAiBusyKey(args.key);
+
+    const optionsText = args.options
+      .map((opt) => `- ${opt.id}: ${opt.label}`)
+      .join("\n");
+
+    const internalPrompt = [
+      `Can you explain these ${args.topic} options and suggest the best one for my current setup?`,
+      "",
+      "Use only one of these option IDs:",
+      optionsText,
+      "",
+      `Current selection: ${args.currentValue || "not selected"}`,
+      "",
+      "Reply with concise reasoning, then end with exactly:",
+      "RECOMMENDATION: <id>",
+    ].join("\n");
+
+    addChatMessage({
+      role: "user",
+      content: `Can you explain these ${args.topic} options and suggest the best one for my current setup?`,
+    });
+
+    try {
+      const response = await sendChatMessage({
+        project_id: projectId || "demo",
+        message: internalPrompt,
+        page_context: [
+          "Page: Train & Forecast (Step 3).",
+          `Baseline model: ${baselineModel || "not selected"}.`,
+          `Multivariate model: ${multivariateModel || "not selected"}.`,
+          `Lag config: ${autoSelectLags ? "auto" : lagConfig}.`,
+          `Validation mode: ${validationMode || "not selected"}.`,
+          `Test window weeks: ${testWindowWeeks}.`,
+          `Horizon: ${horizon}.`,
+          `Selected drivers: ${selectedDrivers.join(", ") || "none"}.`,
+          `Calendar features: ${calendarFeatures ? "on" : "off"}. Holiday features: ${holidayFeatures ? "on" : "off"}.`,
+        ].join(" "),
+        history: chatMessages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
+      });
+
+      addChatMessage({
+        role: "assistant",
+        content: sanitizeAssistantReply(response.content),
+      });
+      const recommendation = extractRecommendation(
+        response.content,
+        args.options.map((o) => o.id)
+      );
+      if (recommendation) {
+        args.applyRecommendation(recommendation);
+      }
+    } catch {
+      addChatMessage({
+        role: "assistant",
+        content:
+          "I couldn't fetch a recommendation right now. Please try again in a few seconds.",
+      });
+    } finally {
+      setAiBusyKey(null);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="rounded-2xl border border-slate-800 bg-gradient-to-r from-slate-900/80 to-slate-800/40 p-5">
@@ -227,8 +317,35 @@ export default function Step3TrainForecast() {
           Choose Models
         </h3>
 
+        <div className="flex items-center justify-between gap-3">
+          <label className="text-sm font-medium text-slate-300">Baseline Model</label>
+          <Button
+            size="icon"
+            variant="secondary"
+            disabled={aiBusyKey !== null}
+            aria-label="Ask Predict Pal about baseline model options"
+            title="Ask Predict Pal"
+            onClick={() =>
+              askPredictPalForChoice({
+                key: "baseline",
+                topic: "baseline model",
+                options: BASELINE_OPTIONS.map((o) => ({ id: o.id, label: o.label })),
+                currentValue: baselineModel,
+                applyRecommendation: setBaselineModel,
+              })
+            }
+          >
+            {aiBusyKey === "baseline" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <span className="inline-flex items-center gap-0.5 leading-none">
+                <span className="text-[11px]">🤖</span>
+                <MessageSquare className="w-3 h-3" />
+              </span>
+            )}
+          </Button>
+        </div>
         <BubbleSelect
-          label="Baseline Model"
           options={BASELINE_OPTIONS}
           selected={baselineModel}
           onSelect={setBaselineModel}
@@ -237,8 +354,35 @@ export default function Step3TrainForecast() {
           fullWidth
         />
 
+        <div className="flex items-center justify-between gap-3">
+          <label className="text-sm font-medium text-slate-300">Multivariate Model</label>
+          <Button
+            size="icon"
+            variant="secondary"
+            disabled={aiBusyKey !== null}
+            aria-label="Ask Predict Pal about multivariate model options"
+            title="Ask Predict Pal"
+            onClick={() =>
+              askPredictPalForChoice({
+                key: "multivariate",
+                topic: "multivariate model",
+                options: MV_MODEL_OPTIONS.map((o) => ({ id: o.id, label: o.label })),
+                currentValue: multivariateModel,
+                applyRecommendation: setMultivariateModel,
+              })
+            }
+          >
+            {aiBusyKey === "multivariate" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <span className="inline-flex items-center gap-0.5 leading-none">
+                <span className="text-[11px]">🤖</span>
+                <MessageSquare className="w-3 h-3" />
+              </span>
+            )}
+          </Button>
+        </div>
         <BubbleSelect
-          label="Multivariate Model"
           options={MV_MODEL_OPTIONS}
           selected={multivariateModel}
           onSelect={setMultivariateModel}
@@ -253,8 +397,43 @@ export default function Step3TrainForecast() {
           <BarChart3 className="w-5 h-5 text-teal-300" />
           Lag Settings
         </h3>
+        <div className="flex items-center justify-between gap-3">
+          <label className="text-sm font-medium text-slate-300">Recommended ranges</label>
+          <Button
+            size="icon"
+            variant="secondary"
+            disabled={aiBusyKey !== null}
+            aria-label="Ask Predict Pal about lag settings"
+            title="Ask Predict Pal"
+            onClick={() =>
+              askPredictPalForChoice({
+                key: "lag-config",
+                topic: "lag configuration",
+                options: LAG_CONFIG_OPTIONS.map((o) => ({ id: o.id, label: o.label })),
+                currentValue: autoSelectLags ? "auto" : lagConfig,
+                applyRecommendation: (value) => {
+                  if (value === "auto") {
+                    setAutoSelectLags(true);
+                    setLagConfig("1,2,4");
+                    return;
+                  }
+                  setAutoSelectLags(false);
+                  setLagConfig(value);
+                },
+              })
+            }
+          >
+            {aiBusyKey === "lag-config" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <span className="inline-flex items-center gap-0.5 leading-none">
+                <span className="text-[11px]">🤖</span>
+                <MessageSquare className="w-3 h-3" />
+              </span>
+            )}
+          </Button>
+        </div>
         <BubbleSelect
-          label="Recommended ranges"
           options={LAG_CONFIG_OPTIONS}
           selected={autoSelectLags ? "auto" : lagConfig}
           onSelect={(value) => {
@@ -342,8 +521,35 @@ export default function Step3TrainForecast() {
           fullWidth
         />
 
+        <div className="flex items-center justify-between gap-3">
+          <label className="text-sm font-medium text-slate-300">Validation mode</label>
+          <Button
+            size="icon"
+            variant="secondary"
+            disabled={aiBusyKey !== null}
+            aria-label="Ask Predict Pal about validation mode options"
+            title="Ask Predict Pal"
+            onClick={() =>
+              askPredictPalForChoice({
+                key: "validation",
+                topic: "validation mode",
+                options: VALIDATION_OPTIONS.map((o) => ({ id: o.id, label: o.label })),
+                currentValue: validationMode,
+                applyRecommendation: setValidationMode,
+              })
+            }
+          >
+            {aiBusyKey === "validation" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <span className="inline-flex items-center gap-0.5 leading-none">
+                <span className="text-[11px]">🤖</span>
+                <MessageSquare className="w-3 h-3" />
+              </span>
+            )}
+          </Button>
+        </div>
         <BubbleSelect
-          label="Validation mode"
           options={VALIDATION_OPTIONS}
           selected={validationMode}
           onSelect={setValidationMode}
