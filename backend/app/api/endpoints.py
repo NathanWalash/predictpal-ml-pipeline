@@ -829,6 +829,13 @@ async def train_model(req: TrainRequest):
                 aligned_driver_df[driver_date_col], errors="coerce"
             )
             aligned_driver_df = aligned_driver_df.dropna(subset=[driver_date_col])
+            target_start = pd.to_datetime(df[date_col].min(), errors="coerce")
+            target_end = pd.to_datetime(df[date_col].max(), errors="coerce")
+            if pd.notna(target_start) and pd.notna(target_end):
+                aligned_driver_df = aligned_driver_df[
+                    (aligned_driver_df[driver_date_col] >= target_start)
+                    & (aligned_driver_df[driver_date_col] <= target_end)
+                ]
             aligned_driver_df = aligned_driver_df.set_index(driver_date_col).sort_index()
             aligned_driver_df = aligned_driver_df.resample(train_freq).mean(numeric_only=True)
             if (
