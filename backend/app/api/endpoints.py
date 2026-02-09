@@ -213,7 +213,8 @@ class TrainRequest(BaseModel):
     multivariate_model: str = "gbm"
     lag_config: str = "1,2,4"
     auto_select_lags: bool = False
-    test_window_weeks: int = 48
+    test_window_periods: int = 48
+    test_window_weeks: int | None = None
     validation_mode: str = "walk_forward"
     calendar_features: bool = False
     holiday_features: bool = False
@@ -587,6 +588,10 @@ async def process_data(req: ProcessRequest):
     else:
         selected_target_freq = resample_freq
 
+    if req.project_id in _projects:
+        _projects[req.project_id].setdefault("config", {})
+        _projects[req.project_id]["config"]["frequency"] = selected_target_freq
+
     for idx, raw_driver_df in enumerate(driver_files):
         if raw_driver_df is None or raw_driver_df.empty:
             continue
@@ -848,6 +853,16 @@ async def train_model(req: TrainRequest):
     date_col = _resolve_df_column(df, date_col, "date")
     target_col = _resolve_df_column(df, target_col, "target")
 
+    if req.test_window_weeks is not None:
+        test_window_periods = req.test_window_weeks
+    else:
+        test_window_periods = req.test_window_periods
+
+    if req.project_id in _projects:
+        _projects[req.project_id].setdefault("config", {})
+        _projects[req.project_id]["config"]["frequency"] = train_freq
+        _projects[req.project_id]["config"]["test_window_periods"] = test_window_periods
+
     try:
         results = train_and_forecast(
             df=df,
@@ -860,7 +875,7 @@ async def train_model(req: TrainRequest):
             multivariate_model=req.multivariate_model,
             lag_config=req.lag_config,
             auto_select_lags=req.auto_select_lags,
-            test_window_weeks=req.test_window_weeks,
+            test_window_weeks=test_window_periods,
             validation_mode=req.validation_mode,
             calendar_features=req.calendar_features,
             holiday_features=req.holiday_features,
