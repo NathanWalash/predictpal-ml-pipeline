@@ -15,7 +15,7 @@ function toTs(value: string | undefined): number | null {
 
 function firstFiniteNumeric(record: Record<string, string | number | null>): number | null {
   for (const [key, raw] of Object.entries(record)) {
-    if (key === "week_ending" || key === "date" || key === "index") continue;
+    if (key === "period_ending" || key === "date" || key === "index") continue;
     const num = Number(raw);
     if (Number.isFinite(num)) return num;
   }
@@ -38,7 +38,7 @@ function buildTrendSummary(analysis: AnalysisBundle): ResultsPageContextData["tr
   for (const row of analysis.datasets.target_series || []) {
     const ts = toTs(
       String(
-        row.week_ending ?? row.date ?? row.index ?? ""
+        row.period_ending ?? row.date ?? row.index ?? ""
       )
     );
     if (ts === null) continue;
@@ -48,7 +48,7 @@ function buildTrendSummary(analysis: AnalysisBundle): ResultsPageContextData["tr
   }
 
   for (const row of analysis.datasets.forecast || []) {
-    const ts = toTs(row.week_ending);
+    const ts = toTs(row.period_ending ?? row.date ?? row.index ?? "");
     const value = Number(row.multivariate_forecast);
     if (ts === null || !Number.isFinite(value)) continue;
     series.push({ ts, value });

@@ -190,13 +190,13 @@ function formatDecimal(value: number, maxFractionDigits = 2) {
 }
 
 function getDateString(row: LooseRecord): string | null {
-  const candidate = row.week_ending ?? row.date ?? row.index ?? row.period;
+  const candidate = row.period_ending ?? row.date ?? row.index ?? row.period;
   return typeof candidate === "string" && candidate.trim() ? candidate : null;
 }
 
 function getPrimaryNumericValue(row: LooseRecord): number | null {
   for (const [key, raw] of Object.entries(row)) {
-    if (key === "week_ending" || key === "date" || key === "index") continue;
+    if (key === "period_ending" || key === "date" || key === "index") continue;
     const n = Number(raw);
     if (Number.isFinite(n)) return n;
   }
@@ -317,13 +317,16 @@ export default function Step4Analysis() {
     () =>
       (analysis?.datasets.test_predictions || [])
         .map((r) => ({
-          ts: parseTimestamp(r.week_ending),
-          week_ending: r.week_ending,
+          ts: parseTimestamp(r.period_ending),
+          period_ending: r.period_ending,
           actual: Number(r.actual),
           baseline: Number(r.baseline),
           multivariate: Number(r.multivariate),
         }))
-        .filter((r): r is { ts: number; week_ending: string; actual: number; baseline: number; multivariate: number } => r.ts !== null)
+        .filter(
+          (r): r is { ts: number; period_ending: string; actual: number; baseline: number; multivariate: number } =>
+            r.ts !== null
+        )
         .sort((a, b) => a.ts - b.ts),
     [analysis]
   );
@@ -340,11 +343,11 @@ export default function Step4Analysis() {
           if (ts === null || actual === null) return null;
           return {
             ts,
-            week_ending: dateString,
+            period_ending: dateString,
             actual,
           };
         })
-        .filter((r): r is { ts: number; week_ending: string; actual: number } => r !== null)
+        .filter((r): r is { ts: number; period_ending: string; actual: number } => r !== null)
         .sort((a, b) => a.ts - b.ts),
     [analysis]
   );
@@ -365,7 +368,7 @@ export default function Step4Analysis() {
       const pred = predMap.get(r.ts);
       return {
         ts: r.ts,
-        week_ending: r.week_ending,
+        period_ending: r.period_ending,
         actual: r.actual,
         baseline: pred ? pred.baseline : null,
         multivariate: pred ? pred.multivariate : null,
@@ -378,13 +381,13 @@ export default function Step4Analysis() {
     () =>
       (analysis?.datasets.forecast || [])
         .map((r) => ({
-          ts: parseTimestamp(r.week_ending),
-          week_ending: r.week_ending,
+          ts: parseTimestamp(r.period_ending),
+          period_ending: r.period_ending,
           baseline_forecast: Number(r.baseline_forecast),
           multivariate_forecast: Number(r.multivariate_forecast),
         }))
         .filter(
-          (r): r is { ts: number; week_ending: string; baseline_forecast: number; multivariate_forecast: number } =>
+          (r): r is { ts: number; period_ending: string; baseline_forecast: number; multivariate_forecast: number } =>
             r.ts !== null
         )
         .sort((a, b) => a.ts - b.ts),
@@ -396,7 +399,7 @@ export default function Step4Analysis() {
       number,
       {
         ts: number;
-        week_ending: string;
+        period_ending: string;
         actual: number | null;
         baseline_forecast: number | null;
         multivariate_forecast: number | null;
@@ -408,7 +411,7 @@ export default function Step4Analysis() {
     for (const row of historicalTargetData) {
       rows.set(row.ts, {
         ts: row.ts,
-        week_ending: row.week_ending,
+        period_ending: row.period_ending,
         actual: row.actual,
         baseline_forecast: null,
         multivariate_forecast: null,
@@ -425,7 +428,7 @@ export default function Step4Analysis() {
       } else {
         rows.set(row.ts, {
           ts: row.ts,
-          week_ending: row.week_ending,
+          period_ending: row.period_ending,
           actual: null,
           baseline_forecast: row.baseline_forecast,
           multivariate_forecast: row.multivariate_forecast,
@@ -468,7 +471,7 @@ export default function Step4Analysis() {
     () =>
       testFitData.map((r) => ({
         ts: r.ts,
-        week_ending: r.week_ending,
+        period_ending: r.period_ending,
         baseline_error: Math.abs(r.actual - r.baseline),
         multivariate_error: Math.abs(r.actual - r.multivariate),
       })),
@@ -476,7 +479,7 @@ export default function Step4Analysis() {
   );
 
   const driverData = useMemo(() => {
-    type DriverRow = { ts: number; week_ending: string } & Record<string, number | string | null>;
+    type DriverRow = { ts: number; period_ending: string } & Record<string, number | string | null>;
     const merged = new Map<number, DriverRow>();
     const settings = analysis?.manifest?.settings || {};
     const preferredDriverKeys = Array.from(
@@ -495,11 +498,15 @@ export default function Step4Analysis() {
         const ts = parseTimestamp(dateString);
         if (ts === null) continue;
 
-        const existing = merged.get(ts) || { ts, week_ending: dateString };
-        const next: DriverRow = { ...existing, ts, week_ending: existing.week_ending || dateString };
+        const existing = merged.get(ts) || { ts, period_ending: dateString };
+        const next: DriverRow = {
+          ...existing,
+          ts,
+          period_ending: existing.period_ending || dateString,
+        };
 
         for (const [key, raw] of Object.entries(asRecord)) {
-          if (key === "week_ending" || key === "date" || key === "index") continue;
+          if (key === "period_ending" || key === "date" || key === "index") continue;
           const n = Number(raw);
           next[key] = Number.isFinite(n) ? n : null;
         }
@@ -516,7 +523,7 @@ export default function Step4Analysis() {
       } else {
         const sample = featureRows[0] as LooseRecord;
         for (const key of Object.keys(sample)) {
-          if (["week_ending", "date", "index", "period", "y"].includes(key)) continue;
+          if (["period_ending", "date", "index", "period", "y"].includes(key)) continue;
           if (key.startsWith("target_lag_") || key.endsWith("_lag_1") || key.endsWith("_lag_2")) continue;
           candidateKeys.add(key);
         }
@@ -529,8 +536,12 @@ export default function Step4Analysis() {
         const ts = parseTimestamp(dateString);
         if (ts === null) continue;
 
-        const existing = merged.get(ts) || { ts, week_ending: dateString };
-        const next: DriverRow = { ...existing, ts, week_ending: existing.week_ending || dateString };
+        const existing = merged.get(ts) || { ts, period_ending: dateString };
+        const next: DriverRow = {
+          ...existing,
+          ts,
+          period_ending: existing.period_ending || dateString,
+        };
         let assigned = false;
 
         for (const key of candidateKeys) {
@@ -563,11 +574,11 @@ export default function Step4Analysis() {
         asRecord.temp ??
         getPrimaryNumericValue(asRecord);
       const temp = Number(tempRaw);
-      const existing = merged.get(ts) || { ts, week_ending: dateString };
+      const existing = merged.get(ts) || { ts, period_ending: dateString };
       merged.set(ts, {
         ...existing,
         ts,
-        week_ending: existing.week_ending || dateString,
+        period_ending: existing.period_ending || dateString,
         temp_mean: Number.isFinite(temp) ? temp : null,
       });
     }
@@ -581,11 +592,11 @@ export default function Step4Analysis() {
 
       const countRaw = asRecord.holiday_count ?? asRecord.value ?? getPrimaryNumericValue(asRecord);
       const count = Number(countRaw);
-      const existing = merged.get(ts) || { ts, week_ending: dateString };
+      const existing = merged.get(ts) || { ts, period_ending: dateString };
       merged.set(ts, {
         ...existing,
         ts,
-        week_ending: existing.week_ending || dateString,
+        period_ending: existing.period_ending || dateString,
         holiday_count: Number.isFinite(count) ? count : null,
       });
     }
@@ -597,7 +608,7 @@ export default function Step4Analysis() {
     const keys = new Set<string>();
     for (const row of driverData as Array<Record<string, unknown>>) {
       for (const key of Object.keys(row)) {
-        if (key === "ts" || key === "week_ending") continue;
+        if (key === "ts" || key === "period_ending") continue;
         keys.add(key);
       }
     }

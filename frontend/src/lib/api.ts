@@ -224,12 +224,12 @@ export interface AnalysisBundle {
   available: Record<string, boolean>;
   datasets: {
     forecast: Array<{
-      week_ending: string;
+      period_ending?: string;
       baseline_forecast: number;
       multivariate_forecast: number;
     }>;
     test_predictions: Array<{
-      week_ending: string;
+      period_ending?: string;
       actual: number;
       baseline: number;
       multivariate: number;
@@ -241,11 +241,12 @@ export interface AnalysisBundle {
     feature_frame: Array<Record<string, string | number | null>>;
     target_series: Array<Record<string, string | number | null>>;
     temp_weekly: Array<{
-      date: string;
+      period_ending?: string;
+      date?: string;
       temp_mean: number;
     }>;
     holiday_weekly: Array<{
-      week_ending?: string;
+      period_ending?: string;
       index?: string;
       date?: string;
       holiday_count: number;
