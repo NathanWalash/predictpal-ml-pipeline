@@ -164,6 +164,11 @@ interface BuildState {
   setOutlierStrategy: (s: string) => void;
   driverOutlierStrategy: string;
   setDriverOutlierStrategy: (s: string) => void;
+  driverSettings: Record<string, { frequency?: string; missingStrategy?: string; outlierStrategy?: string }>;
+  setDriverSetting: (
+    fileName: string,
+    patch: { frequency?: string; missingStrategy?: string; outlierStrategy?: string }
+  ) => void;
   selectedLags: string[];
   toggleLag: (lag: string) => void;
   calendarFeatures: boolean;
@@ -248,6 +253,7 @@ const buildInitial = {
   missingFillValue: "",
   outlierStrategy: "",
   driverOutlierStrategy: "keep",
+  driverSettings: {},
   selectedLags: [] as string[],
   calendarFeatures: false,
   holidayFeatures: false,
@@ -333,9 +339,19 @@ export const useBuildStore = create<BuildState>()((set) => ({
       return { driverFiles, driverNumericColumns };
     }),
   setDriverInfos: (infos) =>
-    set({
-      driverFiles: infos,
-      driverNumericColumns: Array.from(new Set(infos.flatMap((f) => f.numericColumns))),
+    set((state) => {
+      const nextSettings: Record<string, { frequency?: string; missingStrategy?: string; outlierStrategy?: string }> =
+        {};
+      for (const info of infos) {
+        if (state.driverSettings[info.fileName]) {
+          nextSettings[info.fileName] = state.driverSettings[info.fileName];
+        }
+      }
+      return {
+        driverFiles: infos,
+        driverNumericColumns: Array.from(new Set(infos.flatMap((f) => f.numericColumns))),
+        driverSettings: nextSettings,
+      };
     }),
   removeDriverInfo: (fileName) =>
     set((s) => {
@@ -343,10 +359,13 @@ export const useBuildStore = create<BuildState>()((set) => ({
       const driverNumericColumns = Array.from(
         new Set(driverFiles.flatMap((f) => f.numericColumns))
       );
+      const nextDriverSettings = { ...s.driverSettings };
+      delete nextDriverSettings[fileName];
       return {
         driverFiles,
         driverNumericColumns,
         selectedDrivers: s.selectedDrivers.filter((d) => driverNumericColumns.includes(d)),
+        driverSettings: nextDriverSettings,
       };
     }),
   clearDriverInfo: () =>
@@ -354,6 +373,7 @@ export const useBuildStore = create<BuildState>()((set) => ({
       driverFiles: [],
       driverNumericColumns: [],
       selectedDrivers: [],
+      driverSettings: {},
     }),
 
   setFileInfo: (info) =>
@@ -374,6 +394,16 @@ export const useBuildStore = create<BuildState>()((set) => ({
   setMissingFillValue: (v) => set({ missingFillValue: v }),
   setOutlierStrategy: (s) => set({ outlierStrategy: s }),
   setDriverOutlierStrategy: (s) => set({ driverOutlierStrategy: s }),
+  setDriverSetting: (fileName, patch) =>
+    set((state) => ({
+      driverSettings: {
+        ...state.driverSettings,
+        [fileName]: {
+          ...state.driverSettings[fileName],
+          ...patch,
+        },
+      },
+    })),
   toggleLag: (lag) =>
     set((s) => ({
       selectedLags: s.selectedLags.includes(lag)
