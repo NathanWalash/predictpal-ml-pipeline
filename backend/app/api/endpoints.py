@@ -134,6 +134,25 @@ def _resolve_analysis_path_multi(path_value: str, fallbacks: list[str]) -> Path:
     return _resolve_analysis_path("", fallbacks[0])
 
 
+def _resolve_analysis_path_for_dir(base_dir: Path, path_value: str, fallback: str) -> Path:
+    raw = path_value or fallback
+    raw_path = Path(raw)
+    candidate = raw_path.resolve() if raw_path.is_absolute() else (base_dir / raw_path).resolve()
+    if not str(candidate).startswith(str(base_dir.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid analysis file path")
+    return candidate
+
+
+def _resolve_analysis_path_multi_for_dir(base_dir: Path, path_value: str, fallbacks: list[str]) -> Path:
+    if path_value:
+        return _resolve_analysis_path_for_dir(base_dir, path_value, fallbacks[0])
+    for fallback in fallbacks:
+        candidate = _resolve_analysis_path_for_dir(base_dir, "", fallback)
+        if candidate.exists():
+            return candidate
+    return _resolve_analysis_path_for_dir(base_dir, "", fallbacks[0])
+
+
 def _csv_records(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -757,6 +776,102 @@ async def get_analysis_sample():
     }
 
 
+@router.get("/analysis/project/{project_id}")
+async def get_analysis_for_project(project_id: str):
+    project = _projects.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    config = project.get("config") if isinstance(project.get("config"), dict) else {}
+    run_dir_value = config.get("analysis_run_dir")
+    if not run_dir_value:
+        raise HTTPException(status_code=404, detail="No analysis run found for this project")
+
+    base_dir = (OUTPUTS_DIR / str(run_dir_value)).resolve()
+    if not base_dir.exists():
+        raise HTTPException(status_code=404, detail="Analysis run directory not found")
+
+    manifest_path = base_dir / "analysis_result.json"
+    if not manifest_path.exists():
+        raise HTTPException(status_code=404, detail="analysis_result.json not found")
+
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    outputs = manifest.get("outputs", {})
+
+    forecast_path = _resolve_analysis_path_multi_for_dir(
+        base_dir,
+        outputs.get("forecast_csv", ""),
+        ["forecast.csv", "forecasts/forecast.csv"],
+    )
+    test_pred_path = _resolve_analysis_path_for_dir(
+        base_dir,
+        outputs.get("test_predictions_csv", ""),
+        "artifacts/test_predictions.csv",
+    )
+    feature_importance_path = _resolve_analysis_path_for_dir(
+        base_dir,
+        outputs.get("feature_importance_csv", ""),
+        "artifacts/feature_importance.csv",
+    )
+    feature_frame_path = _resolve_analysis_path_for_dir(
+        base_dir,
+        outputs.get("feature_frame_csv", ""),
+        "artifacts/feature_frame.csv",
+    )
+    target_series_path = _resolve_analysis_path_for_dir(
+        base_dir,
+        outputs.get("target_series_csv", ""),
+        "artifacts/target_series.csv",
+    )
+    temp_weekly_path = _resolve_analysis_path_for_dir(
+        base_dir,
+        outputs.get("temp_weekly_csv", ""),
+        "artifacts/temp_weekly.csv",
+    )
+    holiday_weekly_path = _resolve_analysis_path_for_dir(
+        base_dir,
+        outputs.get("holiday_weekly_csv", ""),
+        "artifacts/holiday_weekly.csv",
+    )
+    driver_series_path = _resolve_analysis_path_for_dir(
+        base_dir,
+        outputs.get("driver_series_csv", ""),
+        "artifacts/driver_series.csv",
+    )
+    plot_path = _resolve_analysis_path_for_dir(
+        base_dir,
+        outputs.get("plot", ""),
+        "plots/model_fit.png",
+    )
+
+    return {
+        "manifest": manifest,
+        "available": {
+            "plot": plot_path.exists(),
+            "forecast": forecast_path.exists(),
+            "test_predictions": test_pred_path.exists(),
+            "feature_importance": feature_importance_path.exists(),
+            "feature_frame": feature_frame_path.exists(),
+            "target_series": target_series_path.exists(),
+            "temp_weekly": temp_weekly_path.exists(),
+            "holiday_weekly": holiday_weekly_path.exists(),
+            "driver_series": driver_series_path.exists(),
+        },
+        "datasets": {
+            "forecast": _csv_records(forecast_path),
+            "test_predictions": _csv_records(test_pred_path),
+            "feature_importance": _csv_records(feature_importance_path),
+            "feature_frame": _csv_records(feature_frame_path),
+            "target_series": _csv_records(target_series_path),
+            "temp_weekly": _csv_records(temp_weekly_path),
+            "holiday_weekly": _csv_records(holiday_weekly_path),
+            "driver_series": _csv_records(driver_series_path),
+        },
+    }
+
+
 @router.post("/train")
 async def train_model(req: TrainRequest):
     """Run baseline + multivariate forecasting models."""
@@ -865,10 +980,16 @@ async def train_model(req: TrainRequest):
     else:
         test_window_periods = req.test_window_periods
 
+    run_id = str(uuid.uuid4())
+    run_dir = OUTPUTS_DIR / "runs" / req.project_id / run_id
+
     if req.project_id in _projects:
         _projects[req.project_id].setdefault("config", {})
         _projects[req.project_id]["config"]["frequency"] = train_freq
         _projects[req.project_id]["config"]["test_window_periods"] = test_window_periods
+        _projects[req.project_id]["config"]["analysis_run_dir"] = str(
+            Path("runs") / req.project_id / run_id
+        )
 
     try:
         results = train_and_forecast(
@@ -887,6 +1008,7 @@ async def train_model(req: TrainRequest):
             calendar_features=req.calendar_features,
             holiday_features=req.holiday_features,
             frequency=train_freq,
+            output_dir=run_dir,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Forecasting error: {e}")
