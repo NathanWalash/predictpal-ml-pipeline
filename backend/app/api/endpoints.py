@@ -217,14 +217,14 @@ class TrainRequest(BaseModel):
     validation_mode: str = "walk_forward"
     calendar_features: bool = False
     holiday_features: bool = False
-    frequency: str = "W"
+    frequency: str | None = None
 
 
 class ProcessRequest(BaseModel):
     project_id: str
     date_col: str
     target_col: str
-    frequency: str = "W"
+    frequency: str | None = None
     driver_frequency: str | None = None
     driver_date_col: str | None = None
     outlier_strategy: str = "cap"
@@ -433,11 +433,42 @@ def _normalize_frequency(freq: str | None) -> str:
     mapping = {
         "D": "D",
         "W": "W-SUN",
+        "W-SUN": "W-SUN",
         "MS": "MS",
+        "M": "MS",
+        "ME": "MS",
         "QS": "QS",
         "YS": "YS",
     }
     return mapping.get(freq.upper(), "W-SUN")
+
+
+def _freq_to_days(freq: str | None) -> int | None:
+    if not freq:
+        return None
+    upper = freq.upper()
+    if upper.startswith("D"):
+        return 1
+    if upper.startswith("W"):
+        return 7
+    if upper.startswith("M"):
+        return 30
+    if upper.startswith("Q"):
+        return 91
+    if upper.startswith("Y"):
+        return 365
+    return None
+
+
+def _label_to_freq(label: str | None) -> str | None:
+    if not label:
+        return None
+    mapping = {
+        "daily": "D",
+        "weekly": "W-SUN",
+        "monthly": "MS",
+    }
+    return mapping.get(label.lower())
 
 
 def _normalized_name(value: str) -> str:
@@ -483,7 +514,7 @@ async def process_data(req: ProcessRequest):
     requested_date_col = req.date_col
     process_note: str | None = None
     resample_freq = _normalize_frequency(req.frequency)
-    driver_resample_freq = _normalize_frequency(req.driver_frequency) if req.driver_frequency else resample_freq
+    driver_resample_freq = _normalize_frequency(req.driver_frequency) if req.driver_frequency else None
     try:
         cleaned_df, prep_report = clean_dataframe_for_training(
             raw_df,
@@ -530,15 +561,14 @@ async def process_data(req: ProcessRequest):
     target_col = prep_report["target_col"]
 
     target_only = cleaned_df[[date_col, target_col]].copy()
-    target_only = target_only.set_index(date_col).sort_index()
+    target_only = target_only.sort_values(date_col).reset_index(drop=True)
     target_only[target_col] = pd.to_numeric(target_only[target_col], errors="coerce")
-    target_only = target_only.resample(resample_freq).mean(numeric_only=True)
-    target_only = target_only.dropna(subset=[target_col]).reset_index()
+    target_only = target_only.dropna(subset=[target_col])
 
     if target_only.empty:
         raise HTTPException(
             status_code=400,
-            detail=f"Preprocessing error: no target rows remain after resampling to '{resample_freq}'.",
+            detail="Preprocessing error: no target rows remain after cleaning.",
         )
 
     _processed_dataframes[req.project_id] = target_only
@@ -549,6 +579,13 @@ async def process_data(req: ProcessRequest):
     driver_numeric_cols: list[str] = []
     merged_driver_df: pd.DataFrame | None = None
     used_driver_cols: set[str] = set()
+
+    target_freq_info = validate_frequency(target_only, date_col)
+    detected_target_freq = _label_to_freq(target_freq_info.get("detected_frequency"))
+    if req.frequency is None or str(req.frequency).strip().lower() in {"", "auto"}:
+        selected_target_freq = detected_target_freq or "W-SUN"
+    else:
+        selected_target_freq = resample_freq
 
     for idx, raw_driver_df in enumerate(driver_files):
         if raw_driver_df is None or raw_driver_df.empty:
@@ -567,6 +604,13 @@ async def process_data(req: ProcessRequest):
         driver_df = driver_df.dropna(subset=[requested_driver_date_col]).sort_values(requested_driver_date_col)
         driver_df = driver_df.drop_duplicates(subset=[requested_driver_date_col], keep="last")
 
+        driver_freq_info = validate_frequency(driver_df, requested_driver_date_col)
+        detected_driver_freq = _label_to_freq(driver_freq_info.get("detected_frequency"))
+        if req.driver_frequency is None or str(req.driver_frequency).strip().lower() in {"", "auto"}:
+            selected_driver_freq = detected_driver_freq
+        else:
+            selected_driver_freq = driver_resample_freq
+
         candidate_numeric = [
             c for c in detect_numeric_columns(driver_df)
             if c != requested_driver_date_col
@@ -579,12 +623,8 @@ async def process_data(req: ProcessRequest):
             continue
 
         driver_clean = driver_df[[requested_driver_date_col, *resolved_numeric_cols]].copy()
-        driver_clean = driver_clean.set_index(requested_driver_date_col).sort_index()
-        driver_clean = driver_clean.resample(driver_resample_freq).mean(numeric_only=True)
-        driver_clean = driver_clean.dropna(how="all")
-        driver_clean = driver_clean.reset_index().rename(
-            columns={requested_driver_date_col: date_col}
-        )
+        driver_clean = driver_clean.sort_values(requested_driver_date_col).reset_index(drop=True)
+        driver_clean = driver_clean.rename(columns={requested_driver_date_col: date_col})
 
         # If a single generic "value" column came from a temp file,
         # expose it with a stable semantic name expected by Step 3.
@@ -618,6 +658,10 @@ async def process_data(req: ProcessRequest):
             {
                 "file_name": driver_file_name,
                 "numeric_columns": renamed_cols,
+                "frequency": {
+                    "detected": driver_freq_info,
+                    "selected": selected_driver_freq,
+                },
             }
         )
         driver_numeric_cols.extend(renamed_cols)
@@ -640,11 +684,15 @@ async def process_data(req: ProcessRequest):
         "dtypes": preview["dtypes"],
         "report": prep_report,
         "note": process_note,
+        "target_frequency": {
+            "detected": target_freq_info,
+            "selected": selected_target_freq,
+        },
         "driver": {
             "file_name": driver_file_results[0]["file_name"] if driver_file_results else None,
             "file_names": [item["file_name"] for item in driver_file_results],
             "numeric_columns": driver_numeric_cols,
-            "frequency": driver_resample_freq if driver_file_results else None,
+            "frequency": driver_file_results[0]["frequency"]["selected"] if driver_file_results else None,
             "files": driver_file_results,
         },
     }
@@ -747,6 +795,14 @@ async def train_model(req: TrainRequest):
         date_col = prep_report["date_col"]
         target_col = prep_report["target_col"]
 
+    raw_freq = (req.frequency or "").strip()
+    if raw_freq.lower() in {"", "auto"}:
+        raw_freq = ""
+    train_freq = _normalize_frequency(raw_freq) if raw_freq else None
+    if not train_freq:
+        target_freq_info = validate_frequency(df, date_col)
+        train_freq = _label_to_freq(target_freq_info.get("detected_frequency")) or "W-SUN"
+
     selected_drivers = req.drivers
     if selected_drivers and req.project_id in _processed_driver_dataframes:
         driver_df = _processed_driver_dataframes[req.project_id].copy()
@@ -760,7 +816,9 @@ async def train_model(req: TrainRequest):
 
         driver_date_col = _resolve_optional_df_column(driver_df, date_col)
         if available_driver_cols and driver_date_col:
-            train_freq = _normalize_frequency(req.frequency)
+            driver_freq_info = validate_frequency(driver_df, driver_date_col)
+            driver_gap_days = driver_freq_info.get("median_gap_days")
+            target_gap_days = _freq_to_days(train_freq)
             aligned_driver_df = driver_df[[driver_date_col, *available_driver_cols]].copy()
             aligned_driver_df[driver_date_col] = pd.to_datetime(
                 aligned_driver_df[driver_date_col], errors="coerce"
@@ -768,6 +826,12 @@ async def train_model(req: TrainRequest):
             aligned_driver_df = aligned_driver_df.dropna(subset=[driver_date_col])
             aligned_driver_df = aligned_driver_df.set_index(driver_date_col).sort_index()
             aligned_driver_df = aligned_driver_df.resample(train_freq).mean(numeric_only=True)
+            if (
+                driver_gap_days is not None
+                and target_gap_days is not None
+                and driver_gap_days > target_gap_days
+            ):
+                aligned_driver_df = aligned_driver_df.ffill().bfill()
             aligned_driver_df = aligned_driver_df.reset_index().rename(
                 columns={driver_date_col: date_col}
             )
@@ -800,7 +864,7 @@ async def train_model(req: TrainRequest):
             validation_mode=req.validation_mode,
             calendar_features=req.calendar_features,
             holiday_features=req.holiday_features,
-            frequency=req.frequency,
+            frequency=train_freq,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Forecasting error: {e}")
