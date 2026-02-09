@@ -103,7 +103,6 @@ def prepare_series_and_drivers(
     df = df.set_index(date_col)
 
     resolved_freq = _normalize_train_frequency(frequency) if frequency else _infer_train_frequency(df.index)
-    df = df.asfreq(resolved_freq)
 
     if target_col not in df.columns:
         raise ValueError(f"Target column not found: {target_col}")
@@ -120,7 +119,7 @@ def prepare_series_and_drivers(
             selected_driver_cols = driver_cols
 
     if holiday_features:
-        holiday_df = build_holiday_features(target_series.index)
+        holiday_df = build_holiday_features(target_series.index, freq=resolved_freq)
         if drivers_df is None:
             drivers_df = holiday_df
         elif "holiday_count" not in drivers_df.columns:
@@ -128,7 +127,7 @@ def prepare_series_and_drivers(
 
     calendar_df = None
     if calendar_features:
-        calendar_df = build_calendar_features(target_series.index)
+        calendar_df = build_calendar_features(target_series.index, freq=resolved_freq)
 
     return target_series, drivers_df, calendar_df, selected_driver_cols, resolved_freq
 
@@ -194,7 +193,7 @@ def forecast_future(
         freq=freq,
     )
 
-    future_drivers = build_future_drivers(drivers_df, calendar_df, future_index)
+    future_drivers = build_future_drivers(drivers_df, calendar_df, future_index, freq=freq)
 
     baseline_features = [col for col in frame.columns if col.startswith("target_lag_")]
     multivariate_features = [col for col in frame.columns if col != "y"]
