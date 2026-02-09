@@ -105,6 +105,10 @@ export async function processData(options: {
   driverDateCol?: string;
   outlierStrategy: string;
   driverOutlierStrategy: string;
+  missingStrategy?: string;
+  missingFillValue?: string;
+  driverMissingStrategy?: string;
+  driverSettings?: Record<string, { frequency?: string; missingStrategy?: string; outlierStrategy?: string }>;
 }) {
   const res = await api.post("/process", {
     project_id: options.projectId,
@@ -115,6 +119,10 @@ export async function processData(options: {
     driver_date_col: options.driverDateCol,
     outlier_strategy: options.outlierStrategy,
     driver_outlier_strategy: options.driverOutlierStrategy,
+    missing_strategy: options.missingStrategy,
+    missing_fill_value: options.missingFillValue ? Number(options.missingFillValue) : undefined,
+    driver_missing_strategy: options.driverMissingStrategy,
+    driver_settings: options.driverSettings,
   });
   return res.data;
 }
