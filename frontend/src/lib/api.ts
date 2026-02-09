@@ -260,6 +260,11 @@ export async function getSampleAnalysisBundle(): Promise<AnalysisBundle> {
   return res.data as AnalysisBundle;
 }
 
+export async function getProjectAnalysisBundle(projectId: string): Promise<AnalysisBundle> {
+  const res = await api.get(`/analysis/project/${projectId}`);
+  return res.data as AnalysisBundle;
+}
+
 export type StoryTextStyle = "h1" | "h2" | "h3" | "body" | "bullets";
 export type StoryGraphAssetId =
   | "future-forecast"
