@@ -19,19 +19,20 @@ def build_lagged_frame(series: pd.Series, lags: list[int], prefix: str) -> pd.Da
     return frame
 
 
-def build_calendar_features(index: pd.DatetimeIndex) -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "cal_month": index.month,
-            "cal_quarter": index.quarter,
-            "cal_weekofyear": index.isocalendar().week.astype(int),
-            "cal_dayofweek": index.dayofweek,
-        },
-        index=index,
-    )
+def build_calendar_features(index: pd.DatetimeIndex, freq: str | None = None) -> pd.DataFrame:
+    freq_upper = (freq or "").upper()
+    data = {
+        "cal_month": index.month,
+        "cal_quarter": index.quarter,
+    }
+    if freq_upper.startswith("D") or freq_upper.startswith("W") or not freq_upper:
+        data["cal_weekofyear"] = index.isocalendar().week.astype(int)
+    if freq_upper.startswith("D") or not freq_upper:
+        data["cal_dayofweek"] = index.dayofweek
+    return pd.DataFrame(data, index=index)
 
 
-def build_holiday_features(index: pd.DatetimeIndex) -> pd.DataFrame:
+def build_holiday_features(index: pd.DatetimeIndex, freq: str | None = None) -> pd.DataFrame:
     # Count UK holidays per model period (weekly, monthly, etc.).
     daily = pd.date_range(start=index.min(), end=index.max(), freq="D")
 
@@ -66,8 +67,8 @@ def build_holiday_features(index: pd.DatetimeIndex) -> pd.DataFrame:
         holiday_daily = pd.Series(0, index=daily, name="holiday_count")
         holiday_daily.loc[holiday_days] = 1
 
-    freq = pd.infer_freq(index) or "W-SUN"
-    period_holidays = holiday_daily.resample(freq).sum()
+    resolved_freq = freq or pd.infer_freq(index) or "W-SUN"
+    period_holidays = holiday_daily.resample(resolved_freq).sum()
     period_holidays = period_holidays.reindex(index, fill_value=0).astype(int)
     return period_holidays.to_frame()
 
@@ -109,6 +110,7 @@ def build_future_drivers(
     drivers_df: pd.DataFrame | None,
     calendar_df: pd.DataFrame | None,
     future_index: pd.DatetimeIndex,
+    freq: str | None = None,
 ) -> pd.DataFrame:
     frames = []
     if drivers_df is not None and not drivers_df.empty:
@@ -120,7 +122,7 @@ def build_future_drivers(
         )
         frames.append(driver_future)
     if calendar_df is not None and not calendar_df.empty:
-        cal_future = build_calendar_features(future_index)
+        cal_future = build_calendar_features(future_index, freq=freq)
         frames.append(cal_future)
 
     if not frames:
