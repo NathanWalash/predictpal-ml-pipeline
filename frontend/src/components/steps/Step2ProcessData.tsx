@@ -26,6 +26,7 @@ const FREQUENCY_OPTIONS = [
 ];
 
 const DRIVER_FREQUENCY_OPTIONS = [
+  { id: "auto", label: "Auto", icon: <Sparkles className="w-4 h-4" /> },
   { id: "D", label: "Daily", icon: <Calendar className="w-4 h-4" /> },
   { id: "W", label: "Weekly", icon: <Calendar className="w-4 h-4" /> },
   { id: "MS", label: "Monthly", icon: <Calendar className="w-4 h-4" /> },
@@ -76,6 +77,10 @@ const MISSING_STRATEGY_OPTIONS = [
   },
 ];
 
+const DRIVER_MISSING_STRATEGY_OPTIONS = MISSING_STRATEGY_OPTIONS.filter(
+  (opt) => opt.id !== "value"
+);
+
 const OUTLIER_STRATEGY_OPTIONS = [
   {
     id: "cap",
@@ -119,6 +124,8 @@ export default function Step2ProcessData() {
     setOutlierStrategy,
     driverOutlierStrategy,
     setDriverOutlierStrategy,
+    driverSettings,
+    setDriverSetting,
     completeStep,
     nextStep,
     prevStep,
@@ -179,6 +186,16 @@ export default function Step2ProcessData() {
         ? "keep"
         : driverOutlierStrategy;
 
+  const getDriverSetting = (
+    fileName: string,
+    key: "frequency" | "missingStrategy" | "outlierStrategy",
+    fallback: string
+  ) => {
+    const settings = driverSettings[fileName] || {};
+    const value = settings[key];
+    return value && value.length > 0 ? value : fallback;
+  };
+
   const handleContinue = async () => {
     if (!projectId || !targetCol || !(dateCol || detectedDateCol)) return;
     const resolvedDateCol = dateCol || detectedDateCol;
@@ -197,6 +214,29 @@ export default function Step2ProcessData() {
         driverFrequency: driverFrequency || undefined,
         outlierStrategy: outlierStrategy || "keep",
         driverOutlierStrategy: driverOutlierStrategy || "keep",
+        missingStrategy: missingStrategy || undefined,
+        missingFillValue: missingStrategy === "value" ? missingFillValue : undefined,
+        driverMissingStrategy: undefined,
+        driverSettings:
+          driverFiles.length > 0
+            ? Object.fromEntries(
+                driverFiles.map((file) => [
+                  file.fileName,
+                  {
+                    frequency: (() => {
+                      const value = getDriverSetting(file.fileName, "frequency", "auto");
+                      return value === "auto" ? undefined : value;
+                    })(),
+                    missingStrategy: getDriverSetting(file.fileName, "missingStrategy", "median"),
+                    outlierStrategy: getDriverSetting(
+                      file.fileName,
+                      "outlierStrategy",
+                      normalizedDriverOutlierStrategy || "keep"
+                    ),
+                  },
+                ])
+              )
+            : undefined,
       });
 
       setDateCol(result.detected_date_col || resolvedDateCol);
@@ -378,11 +418,11 @@ export default function Step2ProcessData() {
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 space-y-6">
         <h3 className="text-lg font-semibold text-white flex items-center gap-2">
           <BarChart3 className="w-5 h-5 text-teal-300" />
-          Clean and Prepare Data
+          Clean and Prepare Target Data
         </h3>
 
         <div className="flex items-center justify-between gap-3">
-          <label className="text-sm font-medium text-slate-300">How often is your data?</label>
+          <label className="text-sm font-medium text-slate-300">How often is your target data?</label>
           <Button
             size="icon"
             variant="secondary"
@@ -418,20 +458,8 @@ export default function Step2ProcessData() {
           fullWidth
         />
 
-        {driverFiles.length > 0 && (
-          <BubbleSelect
-            label="How often is your driver data?"
-            options={DRIVER_FREQUENCY_OPTIONS}
-            selected={driverFrequency || frequency || "W"}
-            onSelect={setDriverFrequency}
-            layout="grid"
-            columns={3}
-            fullWidth
-          />
-        )}
-
         <div className="flex items-center justify-between gap-3">
-          <label className="text-sm font-medium text-slate-300">How should we fill missing values?</label>
+          <label className="text-sm font-medium text-slate-300">How should we fill missing target values?</label>
           <Button
             size="icon"
             variant="secondary"
@@ -468,7 +496,7 @@ export default function Step2ProcessData() {
         />
 
         <div className="flex items-center justify-between gap-3">
-          <label className="text-sm font-medium text-slate-300">How should we handle outliers?</label>
+          <label className="text-sm font-medium text-slate-300">How should we handle target outliers?</label>
           <Button
             size="icon"
             variant="secondary"
@@ -504,43 +532,6 @@ export default function Step2ProcessData() {
           fullWidth
         />
 
-        <div className="flex items-center justify-between gap-3">
-          <label className="text-sm font-medium text-slate-300">How should we handle driver outliers?</label>
-          <Button
-            size="icon"
-            variant="secondary"
-            disabled={aiBusyKey !== null}
-            aria-label="Ask Predict Pal about driver outlier options"
-            title="Ask Predict Pal"
-            onClick={() =>
-              askPredictPalForChoice({
-                key: "driver-outlier",
-                topic: "driver outlier handling",
-                options: OUTLIER_STRATEGY_OPTIONS.map((o) => ({ id: o.id, label: o.label })),
-                currentValue: normalizedDriverOutlierStrategy,
-                applyRecommendation: setDriverOutlierStrategy,
-              })
-            }
-          >
-            {aiBusyKey === "driver-outlier" ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <span className="inline-flex items-center gap-0.5 leading-none">
-                <span className="text-[11px]">🤖</span>
-                <MessageSquare className="w-3 h-3" />
-              </span>
-            )}
-          </Button>
-        </div>
-        <BubbleSelect
-          options={OUTLIER_STRATEGY_OPTIONS}
-          selected={normalizedDriverOutlierStrategy || "keep"}
-          onSelect={setDriverOutlierStrategy}
-          layout="grid"
-          columns={3}
-          fullWidth
-        />
-
         {missingStrategy === "value" && (
           <Input
             type="number"
@@ -551,6 +542,81 @@ export default function Step2ProcessData() {
           />
         )}
       </div>
+
+      {driverFiles.length > 0 && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 space-y-6">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-teal-300" />
+            Clean and Prepare Driver Data
+          </h3>
+
+          {driverFiles.map((file) => {
+            const driverFrequencyValue = getDriverSetting(
+              file.fileName,
+              "frequency",
+              driverFrequency || "auto"
+            );
+            const driverMissingValue = getDriverSetting(file.fileName, "missingStrategy", "median");
+            const driverOutlierValue = getDriverSetting(
+              file.fileName,
+              "outlierStrategy",
+              normalizedDriverOutlierStrategy || "keep"
+            );
+
+            return (
+              <div
+                key={file.fileName}
+                className="rounded-xl border border-slate-800/60 bg-slate-950/40 p-4 space-y-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-white">{file.fileName}</p>
+                    <p className="text-xs text-slate-400">{file.rowCount.toLocaleString()} rows</p>
+                  </div>
+                </div>
+
+                <BubbleSelect
+                  label="Driver frequency"
+                  options={DRIVER_FREQUENCY_OPTIONS}
+                  selected={driverFrequencyValue}
+                  onSelect={(value) => {
+                    setDriverFrequency(value);
+                    setDriverSetting(file.fileName, { frequency: value });
+                  }}
+                  layout="grid"
+                  columns={3}
+                  fullWidth
+                />
+
+                <BubbleSelect
+                  label="Driver missing value handling"
+                  options={DRIVER_MISSING_STRATEGY_OPTIONS}
+                  selected={driverMissingValue}
+                  onSelect={(value) =>
+                    setDriverSetting(file.fileName, { missingStrategy: value })
+                  }
+                  layout="grid"
+                  columns={2}
+                  fullWidth
+                />
+
+                <BubbleSelect
+                  label="Driver outlier handling"
+                  options={OUTLIER_STRATEGY_OPTIONS}
+                  selected={driverOutlierValue}
+                  onSelect={(value) => {
+                    setDriverOutlierStrategy(value);
+                    setDriverSetting(file.fileName, { outlierStrategy: value });
+                  }}
+                  layout="grid"
+                  columns={3}
+                  fullWidth
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {processError && (
         <div className="rounded-xl border border-red-900/50 bg-red-950/30 px-4 py-3 text-sm text-red-300">
